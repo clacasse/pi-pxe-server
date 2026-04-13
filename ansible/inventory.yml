@@ -1,5 +1,7 @@
+# Update ansible_host with your Pi's IP address
+# Update ansible_user with the username you set in Pi Imager
 all:
   hosts:
     pxe-server:
-      ansible_host: 192.168.1.219
-      ansible_user: pi
+      ansible_host: <pxe-server-ip>
+      ansible_user: <pi-username>

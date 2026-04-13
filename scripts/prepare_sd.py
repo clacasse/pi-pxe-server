@@ -264,16 +264,16 @@ def prepare(
 
     # ---- PXE server IP ----
     if not pxe_ip:
-        pxe_ip = typer.prompt("PXE server (Pi) IP address", default="192.168.1.219")
+        pxe_ip = typer.prompt("PXE server (Pi) IP address")
 
     # ---- Target machine config ----
     console.print("\n[bold]Target Machine Configuration[/bold]")
 
     if not hostname:
-        hostname = typer.prompt("Hostname", default="server-01")
+        hostname = typer.prompt("Hostname")
 
     if not username:
-        username = typer.prompt("Username", default="admin")
+        username = typer.prompt("Username")
 
     password = typer.prompt("Password", hide_input=True, confirmation_prompt=True)
 
@@ -337,7 +337,7 @@ def prepare(
         "  1. Eject the SD card\n"
         "  2. Insert into Pi and power on (connect ethernet first)\n"
         f"  3. Wait for setup to complete (~30 min, mostly ISO download)\n"
-        f"  4. Monitor: [cyan]ssh pi@{pxe_ip} 'journalctl -u pxe-firstboot -f'[/cyan]\n"
+        f"  4. Monitor: [cyan]ssh <pi-user>@{pxe_ip} 'journalctl -u pxe-firstboot -f'[/cyan]\n"
         "  5. PXE boot the target machine",
         title="Done",
     ))

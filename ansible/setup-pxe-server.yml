@@ -216,7 +216,7 @@
         content: |
           # ProxyDHCP mode - works alongside existing DHCP
           port=0
-          dhcp-range=192.168.1.0,proxy
+          dhcp-range={{ pxe_server_ip | regex_replace('\.\d+$', '.0') }},proxy
 
           # Only serve PXE to tagged machines
           {% for client in pxe_clients %}

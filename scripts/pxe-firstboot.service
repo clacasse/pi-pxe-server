@@ -2,11 +2,10 @@
 Description=PXE Server First Boot Setup
 After=network-online.target
 Wants=network-online.target
-ConditionPathExists=/boot/firmware/pxe-homelab
 
 [Service]
 Type=oneshot
-ExecStart=/boot/firmware/pxe-firstboot.sh
+ExecStart=/bin/bash -c 'for d in /boot/firmware /boot; do [ -f "$d/pxe-firstboot.sh" ] && exec "$d/pxe-firstboot.sh"; done'
 RemainAfterExit=yes
 StandardOutput=journal+console
 StandardError=journal+console
