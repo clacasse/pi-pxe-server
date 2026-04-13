@@ -168,8 +168,12 @@
           {% for pkg in target_packages %}
               - {{ pkg }}
           {% endfor %}
+          {% if target_late_commands %}
             late-commands:
-              - curtin in-target -- ubuntu-drivers install --gpgpu
+          {% for cmd in target_late_commands %}
+              - {{ cmd }}
+          {% endfor %}
+          {% endif %}
             shutdown: reboot
         dest: "{{ pxe_home }}/http/autoinstall/user-data"
         owner: "{{ ansible_user }}"

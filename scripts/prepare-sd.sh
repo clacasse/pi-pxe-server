@@ -1,15 +1,111 @@
 #!/bin/bash
-# Run this on your PC after flashing the SD card with Pi Imager
-# Copies the repo and firstboot service to the boot partition
+# Prepare a Raspberry Pi SD card as a PXE server
+# Works on Linux, macOS, and WSL
 #
-# Usage: ./prepare-sd.sh /path/to/boot/partition
-#   Windows example: ./prepare-sd.sh /mnt/d
-#   Linux example:   ./prepare-sd.sh /media/user/bootfs
+# Usage: ./prepare-sd.sh [/path/to/boot/partition]
+#   If no path given, attempts to auto-detect
 set -e
 
-BOOT_MOUNT="${1:?Usage: $0 /path/to/boot/partition}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
+CONFIG_DIR="$REPO_DIR/ansible/group_vars"
+
+# ==================== Helpers ====================
+
+prompt() {
+    local var="$1" prompt="$2" default="$3"
+    if [ -n "$default" ]; then
+        read -rp "$prompt [$default]: " value
+        eval "$var=\"${value:-$default}\""
+    else
+        read -rp "$prompt: " value
+        eval "$var=\"$value\""
+    fi
+}
+
+prompt_password() {
+    local var="$1" prompt="$2"
+    while true; do
+        read -rsp "$prompt: " pass1
+        echo
+        read -rsp "Confirm password: " pass2
+        echo
+        if [ "$pass1" = "$pass2" ]; then
+            eval "$var=\"$pass1\""
+            return
+        fi
+        echo "Passwords don't match. Try again."
+    done
+}
+
+generate_password_hash() {
+    local password="$1"
+    # Try multiple methods for cross-platform support
+    if command -v python3 &>/dev/null; then
+        python3 -c "import crypt; print(crypt.crypt('$password', crypt.mksalt(crypt.METHOD_SHA512)))"
+    elif command -v openssl &>/dev/null; then
+        openssl passwd -6 "$password" 2>/dev/null
+    elif command -v mkpasswd &>/dev/null; then
+        mkpasswd --method=SHA-512 "$password"
+    else
+        echo "ERROR: No password hashing tool found (need python3, openssl, or mkpasswd)" >&2
+        exit 1
+    fi
+}
+
+detect_boot_partition() {
+    # macOS
+    if [ -d "/Volumes/bootfs" ]; then
+        echo "/Volumes/bootfs"
+        return
+    fi
+    # Linux
+    for dir in /media/$USER/bootfs /media/$USER/boot; do
+        if [ -d "$dir" ]; then
+            echo "$dir"
+            return
+        fi
+    done
+    # WSL - check common drive letters
+    for letter in d e f g h; do
+        if [ -f "/mnt/$letter/config.txt" ] || [ -f "/mnt/$letter/cmdline.txt" ]; then
+            echo "/mnt/$letter"
+            return
+        fi
+    done
+    return 1
+}
+
+get_ssh_pubkey() {
+    # Check common locations
+    for keyfile in ~/.ssh/id_ed25519.pub ~/.ssh/id_rsa.pub ~/.ssh/id_ecdsa.pub; do
+        if [ -f "$keyfile" ]; then
+            cat "$keyfile"
+            return
+        fi
+    done
+    return 1
+}
+
+# ==================== Detect Boot Partition ====================
+
+BOOT_MOUNT="${1:-}"
+if [ -z "$BOOT_MOUNT" ]; then
+    echo "Attempting to auto-detect boot partition..."
+    if BOOT_MOUNT=$(detect_boot_partition); then
+        echo "Found: $BOOT_MOUNT"
+        read -rp "Use this? [Y/n]: " confirm
+        if [[ "$confirm" =~ ^[Nn] ]]; then
+            prompt BOOT_MOUNT "Enter path to boot partition"
+        fi
+    else
+        echo "Could not auto-detect boot partition."
+        echo "  macOS:  usually /Volumes/bootfs"
+        echo "  Linux:  usually /media/\$USER/bootfs"
+        echo "  WSL:    usually /mnt/d or /mnt/e"
+        prompt BOOT_MOUNT "Enter path to boot partition"
+    fi
+fi
 
 if [ ! -f "$BOOT_MOUNT/config.txt" ] && [ ! -f "$BOOT_MOUNT/cmdline.txt" ]; then
     echo "ERROR: $BOOT_MOUNT doesn't look like a Raspberry Pi boot partition"
@@ -17,45 +113,93 @@ if [ ! -f "$BOOT_MOUNT/config.txt" ] && [ ! -f "$BOOT_MOUNT/cmdline.txt" ]; then
     exit 1
 fi
 
-echo "=== Preparing SD Card ==="
-echo "Boot partition: $BOOT_MOUNT"
-echo "Repo source: $REPO_DIR"
+echo ""
+echo "=== PXE Server Configuration ==="
+echo ""
 
-# Copy repo to boot partition (excluding .git and large files)
-echo "Copying repo..."
+# ==================== Gather Configuration ====================
+
+# PXE server IP
+prompt PXE_IP "PXE server (Pi) IP address" "192.168.1.219"
+
+# Target machine config
+echo ""
+echo "--- Target Machine (the machine PXE will install) ---"
+prompt TARGET_HOSTNAME "Hostname" "server-01"
+prompt TARGET_USERNAME "Username" "admin"
+prompt_password TARGET_PASSWORD "Password"
+prompt TARGET_MAC "MAC address (format aa:bb:cc:dd:ee:ff)"
+
+# SSH key
+echo ""
+SSH_KEY=""
+if found_key=$(get_ssh_pubkey); then
+    echo "Found SSH key: ${found_key:0:50}..."
+    read -rp "Use this key? [Y/n]: " use_key
+    if [[ ! "$use_key" =~ ^[Nn] ]]; then
+        SSH_KEY="$found_key"
+    fi
+fi
+if [ -z "$SSH_KEY" ]; then
+    prompt SSH_KEY "SSH public key (paste full key)"
+fi
+
+# ==================== Generate Config ====================
+
+echo ""
+echo "Generating password hash..."
+PASSWORD_HASH=$(generate_password_hash "$TARGET_PASSWORD")
+
+echo "Creating configuration..."
+mkdir -p "$CONFIG_DIR"
+cat > "$CONFIG_DIR/all.yml" << YAML
+# Generated by prepare-sd.sh on $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+pxe_server_ip: "$PXE_IP"
+
+ubuntu_version: "24.04.2"
+
+grub_signed_deb_url: "http://archive.ubuntu.com/ubuntu/pool/main/g/grub2-signed/grub-efi-amd64-signed_1.202+2.12-1ubuntu7_amd64.deb"
+grub_modules_deb_url: "http://archive.ubuntu.com/ubuntu/pool/main/g/grub2-unsigned/grub-efi-amd64-bin_2.12-1ubuntu7_amd64.deb"
+
+pxe_clients:
+  - mac: "$TARGET_MAC"
+    name: "$TARGET_HOSTNAME"
+
+target_hostname: "$TARGET_HOSTNAME"
+target_username: "$TARGET_USERNAME"
+target_password_hash: "$PASSWORD_HASH"
+target_ssh_authorized_keys:
+  - "$SSH_KEY"
+
+target_packages:
+  - curl
+  - git
+  - ansible
+  - jq
+
+target_late_commands: []
+YAML
+
+# ==================== Copy to SD Card ====================
+
+echo "Copying files to SD card..."
+
+# Copy repo (excluding .git and large/generated files)
 mkdir -p "$BOOT_MOUNT/pxe-homelab"
 cp -r "$REPO_DIR/ansible" "$BOOT_MOUNT/pxe-homelab/"
 cp -r "$REPO_DIR/scripts" "$BOOT_MOUNT/pxe-homelab/"
 cp "$REPO_DIR/README.md" "$BOOT_MOUNT/pxe-homelab/"
 cp "$REPO_DIR/.gitignore" "$BOOT_MOUNT/pxe-homelab/"
 
-# Check for all.yml config
-if [ ! -f "$REPO_DIR/ansible/group_vars/all.yml" ]; then
-    echo ""
-    echo "WARNING: ansible/group_vars/all.yml not found."
-    echo "Copying example config - you MUST edit it before the playbook runs."
-    cp "$REPO_DIR/ansible/group_vars/all.yml.example" \
-       "$BOOT_MOUNT/pxe-homelab/ansible/group_vars/all.yml"
-else
-    cp "$REPO_DIR/ansible/group_vars/all.yml" \
-       "$BOOT_MOUNT/pxe-homelab/ansible/group_vars/all.yml"
-fi
-
 # Copy firstboot script and service
-echo "Installing firstboot service..."
 cp "$REPO_DIR/scripts/firstboot.sh" "$BOOT_MOUNT/pxe-firstboot.sh"
 chmod +x "$BOOT_MOUNT/pxe-firstboot.sh"
+cp "$REPO_DIR/scripts/pxe-firstboot.service" "$BOOT_MOUNT/pxe-firstboot.service"
 
-# Create a script that enables the service on first boot
-# This runs as part of Pi's init before our service
-cat > "$BOOT_MOUNT/custom.toml" << 'EOF'
-# This file is not standard - we use firstrun.sh instead
-EOF
-
-# Append to firstrun.sh if it exists, otherwise create cmdline hook
+# Hook into Pi Imager's firstrun.sh to enable our service
 if [ -f "$BOOT_MOUNT/firstrun.sh" ]; then
-    # Pi Imager creates this - append our service setup
-    sed -i '/^exit 0/d' "$BOOT_MOUNT/firstrun.sh"
+    sed -i.bak '/^exit 0/d' "$BOOT_MOUNT/firstrun.sh"
     cat >> "$BOOT_MOUNT/firstrun.sh" << 'FIRSTRUN'
 
 # Enable PXE firstboot service
@@ -65,24 +209,27 @@ systemctl enable pxe-firstboot.service
 
 exit 0
 FIRSTRUN
+    rm -f "$BOOT_MOUNT/firstrun.sh.bak"
 else
-    echo "WARNING: No firstrun.sh found. You'll need to manually enable the service after boot:"
-    echo "  sudo cp /boot/firmware/pxe-firstboot.sh /usr/local/bin/"
+    echo ""
+    echo "WARNING: No firstrun.sh found (did you configure the Pi in the Imager?)."
+    echo "After booting, manually run:"
     echo "  sudo cp /boot/firmware/pxe-firstboot.service /etc/systemd/system/"
     echo "  sudo systemctl enable --now pxe-firstboot.service"
 fi
 
-# Copy the systemd service file to boot partition
-cp "$REPO_DIR/scripts/pxe-firstboot.service" "$BOOT_MOUNT/pxe-firstboot.service"
-
 echo ""
 echo "=== SD Card Ready ==="
-echo "1. Eject the SD card"
-echo "2. Insert into Pi and power on"
-echo "3. The Pi will automatically:"
-echo "   - Boot and configure the user (Pi Imager settings)"
-echo "   - Install Ansible and git"
-echo "   - Run the PXE server playbook"
-echo "   - Download Ubuntu ISO (~2.6GB, takes a while)"
 echo ""
-echo "Monitor progress: ssh pi@pxe-server 'journalctl -u pxe-firstboot -f'"
+echo "Configuration:"
+echo "  PXE Server IP:   $PXE_IP"
+echo "  Target Hostname: $TARGET_HOSTNAME"
+echo "  Target Username: $TARGET_USERNAME"
+echo "  Target MAC:      $TARGET_MAC"
+echo ""
+echo "Next steps:"
+echo "  1. Eject the SD card"
+echo "  2. Insert into Pi and power on (connect ethernet first)"
+echo "  3. Wait for setup to complete (~30 min, mostly ISO download)"
+echo "  4. Monitor: ssh pi@$PXE_IP 'journalctl -u pxe-firstboot -f'"
+echo "  5. PXE boot the target machine"

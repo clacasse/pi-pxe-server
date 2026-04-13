@@ -1,21 +1,23 @@
 # PXE Homelab
 
-Automated bare metal provisioning for a GPU workstation running Kubernetes + Ollama.
+Automated bare metal provisioning for Ubuntu servers via PXE boot from a Raspberry Pi.
 
 ## What This Does
 
-From a fresh Raspberry Pi and a bare metal PC, this repo sets up:
+From a fresh Raspberry Pi and a bare metal PC, this repo:
 
-1. **PXE Server** (Raspberry Pi) - Serves Ubuntu autoinstall over the network
-2. **GPU Workstation** - Ubuntu 24.04 LTS with NVIDIA drivers, k3s, and Ollama
+1. Turns a **Raspberry Pi** into a PXE server (dnsmasq + nginx)
+2. PXE boots target machines with a fully **unattended Ubuntu 24.04 LTS** install
+3. Leaves you with a clean Ubuntu server ready for further provisioning via Ansible
 
 ## Prerequisites
 
-- Raspberry Pi 4 (or 3B+) with Raspberry Pi OS Lite (64-bit)
-- GPU workstation connected via ethernet to the same network
-- Existing DHCP server on the network (e.g., UniFi, router)
-- Secure Boot disabled on the GPU workstation
-- PXE/Network boot enabled in GPU workstation BIOS
+- Raspberry Pi (4 recommended, 3B+ works)
+- Target machine connected via ethernet to the same network
+- Existing DHCP server on the network (router, UniFi, etc.)
+- On the target machine:
+  - Secure Boot disabled
+  - PXE/Network boot set as first boot option in BIOS
 
 ## Quick Start
 
@@ -23,7 +25,7 @@ From a fresh Raspberry Pi and a bare metal PC, this repo sets up:
 
 Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/):
 - OS: **Raspberry Pi OS Lite (64-bit)**
-- Enable SSH, set hostname to `pxe-server`, set username `pi` + password
+- Click the gear icon to set: hostname `pxe-server`, enable SSH, username `pi` + password
 - Skip WiFi (use ethernet)
 - Flash the SD card, but **don't eject yet**
 
@@ -32,48 +34,41 @@ Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/):
 ```bash
 git clone git@github.com:clacasse/pxe-homelab.git
 cd pxe-homelab
-
-# Create your config
-cp ansible/group_vars/all.yml.example ansible/group_vars/all.yml
-# Edit all.yml with your IP, MAC address, SSH key, etc.
-
-# Copy repo and firstboot service to the SD card boot partition
-./scripts/prepare-sd.sh /path/to/boot/partition
+./scripts/prepare-sd.sh
 ```
 
-Eject the SD card and insert into the Pi.
+The script will:
+- Auto-detect the boot partition (or ask you)
+- Prompt for target machine config (hostname, username, password, MAC address)
+- Generate the password hash
+- Copy everything to the SD card
+
+Works on **Linux**, **macOS**, and **WSL**.
 
 ### Step 3: Boot the Pi
 
-Power on the Pi. It will automatically:
-1. Boot and configure the user (from Pi Imager settings)
-2. Install Ansible and git
-3. Run the PXE server playbook
-4. Download Ubuntu ISO (~2.6GB)
+1. Eject the SD card, insert into Pi
+2. Connect ethernet, power on
+3. The Pi will automatically install dependencies and configure PXE services
+4. Monitor: `ssh pi@pxe-server 'journalctl -u pxe-firstboot -f'`
 
-Monitor progress: `ssh pi@pxe-server 'journalctl -u pxe-firstboot -f'`
+### Step 4: PXE Boot the Target Machine
 
-### Step 4: PXE Boot the GPU Workstation
-
-1. Ensure the workstation's MAC is listed in `ansible/group_vars/all.yml`
-2. Power on the workstation (BIOS set to PXE boot first, Secure Boot off)
-3. It will PXE boot, install Ubuntu headlessly, and reboot
-4. SSH in: `ssh chris@ollama-server`
-
-### Step 5: Provision the GPU Workstation (TODO)
-
-```bash
-ansible-playbook -i ansible/inventory.yml ansible/site.yml
-```
+1. Connect target machine via ethernet
+2. Power on - it will PXE boot and install Ubuntu automatically
+3. Wait ~20-30 min for install to complete
+4. SSH in: `ssh <username>@<hostname>`
 
 ## How PXE Boot Control Works
 
 BIOS is set to PXE boot first on all managed machines. The PXE server controls which machines get re-imaged:
 
 - **Normal boot**: dnsmasq ignores the PXE request, machine boots from local disk (~3 sec delay)
-- **Re-image**: Add MAC to `pxe_clients` in config, restart dnsmasq, reboot machine
+- **Re-image**: MAC is listed in config, dnsmasq responds, Ubuntu installs automatically
 
-## Network Architecture
+To re-image a machine later, add its MAC to `ansible/group_vars/all.yml` under `pxe_clients` and restart dnsmasq on the Pi.
+
+## Architecture
 
 ```
 ┌──────────────────────────────────────────────┐
@@ -85,7 +80,41 @@ BIOS is set to PXE boot first on all managed machines. The PXE server controls w
         Network (existing DHCP from router)
                       │
 ┌─────────────────────┴────────────────────────┐
-│  GPU Workstation                              │
-│  PXE boot -> Ubuntu autoinstall -> k3s       │
+│  Target Machine                               │
+│  PXE boot -> Ubuntu 24.04 autoinstall        │
 └──────────────────────────────────────────────┘
 ```
+
+## File Structure
+
+```
+pxe-homelab/
+├── README.md
+├── ansible/
+│   ├── inventory.yml
+│   ├── setup-pxe-server.yml      # Ansible playbook for Pi
+│   └── group_vars/
+│       ├── all.yml.example        # Template config
+│       └── all.yml                # Your config (gitignored)
+├── scripts/
+│   ├── prepare-sd.sh              # Interactive SD card setup
+│   ├── firstboot.sh               # Runs on Pi's first boot
+│   ├── bootstrap.sh               # Manual alternative to firstboot
+│   └── pxe-firstboot.service      # systemd unit for firstboot
+└── k8s/                           # Optional k8s manifests
+    └── ollama/
+```
+
+## Customization
+
+Edit `ansible/group_vars/all.yml` to change:
+- `pxe_clients` - MAC addresses of machines to PXE boot
+- `target_packages` - packages installed during Ubuntu setup
+- `target_late_commands` - custom commands run at end of install
+
+## Troubleshooting
+
+See the [full troubleshooting guide](docs/troubleshooting.md) or check:
+- dnsmasq logs: `sudo journalctl -u dnsmasq -f`
+- nginx logs: `sudo journalctl -u nginx -f`
+- firstboot logs: `sudo journalctl -u pxe-firstboot -f`
