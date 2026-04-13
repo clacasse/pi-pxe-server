@@ -116,7 +116,6 @@ pxe-homelab/
 │   ├── bootstrap.sh               # Manual alternative to firstboot
 │   └── pxe-firstboot.service      # systemd unit for firstboot
 └── k8s/                           # Optional k8s manifests
-    └── ollama/
 ```
 
 ## Customization
