@@ -68,6 +68,18 @@ def is_boot_partition(path: Path) -> bool:
     return (path / "config.txt").exists() or (path / "cmdline.txt").exists()
 
 
+def _copy_tree_fat32(src: Path, dst: Path) -> None:
+    """Recursively copy a directory to a FAT32 filesystem without touching metadata."""
+    dst.mkdir(exist_ok=True)
+    for item in src.iterdir():
+        src_item = src / item.name
+        dst_item = dst / item.name
+        if src_item.is_dir():
+            _copy_tree_fat32(src_item, dst_item)
+        else:
+            shutil.copyfile(src_item, dst_item)
+
+
 def copy_to_sd(boot_mount: Path) -> None:
     """Copy repo files and firstboot service to the SD card."""
     sd_repo = boot_mount / "pxe-homelab"
@@ -81,7 +93,7 @@ def copy_to_sd(boot_mount: Path) -> None:
     for item in ["ansible", "scripts", "templates"]:
         src = REPO_DIR / item
         if src.exists():
-            shutil.copytree(src, sd_repo / item, copy_function=shutil.copyfile)
+            _copy_tree_fat32(src, sd_repo / item)
     for item in ["README.md", ".gitignore", "pyproject.toml"]:
         src = REPO_DIR / item
         if src.exists():
