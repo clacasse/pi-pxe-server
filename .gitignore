@@ -9,7 +9,10 @@ tftp/initrd
 tftp/grubnetx64.efi
 tftp/grub/x86_64-efi/
 
+# Python
+__pycache__/
+.venv/
+
 # OS
 .DS_Store
 Thumbs.db
-__pycache__/

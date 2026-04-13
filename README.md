@@ -35,7 +35,9 @@ Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/):
 ```bash
 git clone git@github.com:clacasse/pxe-homelab.git
 cd pxe-homelab
-pip install typer rich
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 python scripts/prepare_sd.py
 ```
 
