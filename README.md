@@ -42,15 +42,17 @@ python scripts/prepare_sd.py
 ```
 
 The script will prompt you for:
-- PXE server (Pi) IP address
+- Pi hostname and username (as set in Raspberry Pi Imager)
 - Target machine hostname, username, password, MAC address
 - SSH public key (auto-detected if available)
+
+The PXE server IP is auto-detected at runtime — no need to know it in advance.
 
 All options can also be passed as flags for non-interactive use:
 
 ```bash
 python scripts/prepare_sd.py /path/to/boot/partition \
-    --pxe-ip <pi-ip> \
+    --pi-hostname pxe-server \
     --hostname <target-hostname> \
     --username <target-username> \
     --mac <target-mac> \
@@ -65,7 +67,7 @@ Works on **Linux**, **macOS**, and **WSL**.
 1. Eject the SD card, insert into Pi
 2. Connect ethernet, power on
 3. The Pi will automatically install dependencies and configure PXE services
-4. Monitor: `ssh <pi-user>@<pi-ip> 'journalctl -u pxe-firstboot -f'`
+4. Monitor: `ssh <pi-user>@<pi-hostname> 'journalctl -u pxe-firstboot -f'`
 
 ### Step 4: PXE Boot the Target Machine
 
@@ -136,7 +138,7 @@ python scripts/configure.py --edit
 
 # Non-interactive
 python scripts/configure.py \
-    --pxe-ip <ip> --pi-user <user> \
+    --pi-hostname pxe-server --pi-user <user> \
     --hostname <host> --username <user> --password <pass> \
     --mac <mac> --ssh-key-file ~/.ssh/id_ed25519.pub \
     --packages curl,git,ansible,jq \

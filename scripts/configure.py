@@ -73,8 +73,6 @@ def render_template(template_name: str, variables: dict) -> str:
 
 
 def write_all_yml(
-    pxe_server_ip: str,
-    pi_user: str,
     target_hostname: str,
     target_username: str,
     password_hash: str,
@@ -102,7 +100,6 @@ def write_all_yml(
 
     variables = {
         "timestamp": timestamp,
-        "pxe_server_ip": pxe_server_ip,
         "ubuntu_version": ubuntu_version,
         "grub_signed_deb_url": GRUB_SIGNED_DEB_URL,
         "grub_modules_deb_url": GRUB_MODULES_DEB_URL,
@@ -120,12 +117,12 @@ def write_all_yml(
     return config_path
 
 
-def write_inventory_yml(pxe_server_ip: str, pi_user: str) -> Path:
+def write_inventory_yml(pi_hostname: str, pi_user: str) -> Path:
     """Generate ansible/inventory.yml from template."""
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     variables = {
         "timestamp": timestamp,
-        "pxe_server_ip": pxe_server_ip,
+        "pi_hostname": pi_hostname,
         "pi_user": pi_user,
     }
 
@@ -197,7 +194,7 @@ def collect_late_commands(existing: list[str] | None = None) -> list[str]:
 
 @app.command()
 def configure(
-    pxe_ip: str = typer.Option(None, "--pxe-ip", help="PXE server (Pi) IP address"),
+    pi_hostname: str = typer.Option(None, "--pi-hostname", help="Pi hostname (for remote Ansible access)"),
     pi_user: str = typer.Option(None, "--pi-user", help="Pi username (set in Raspberry Pi Imager)"),
     hostname: str = typer.Option(None, "--hostname", help="Target machine hostname"),
     username: str = typer.Option(None, "--username", help="Target machine username"),
@@ -227,14 +224,16 @@ def configure(
             return existing[key]
         return fallback
 
-    # ---- Gather inputs ----
+    # ---- Pi connection info (for inventory) ----
+    console.print("[bold]PXE Server (Raspberry Pi)[/bold]")
 
-    if not pxe_ip:
-        pxe_ip = typer.prompt("PXE server (Pi) IP address", default=default("pxe_server_ip") or None)
+    if not pi_hostname:
+        pi_hostname = typer.prompt("Pi hostname", default="pxe-server")
 
     if not pi_user:
-        pi_user = typer.prompt("Pi username", default=default("", "pi") if not existing else None)
+        pi_user = typer.prompt("Pi username")
 
+    # ---- Target machine config ----
     console.print("\n[bold]Target Machine Configuration[/bold]")
 
     if not hostname:
@@ -289,8 +288,6 @@ def configure(
     console.print("Writing configuration files...")
 
     all_yml_path = write_all_yml(
-        pxe_server_ip=pxe_ip,
-        pi_user=pi_user,
         target_hostname=hostname,
         target_username=username,
         password_hash=password_hash,
@@ -302,14 +299,14 @@ def configure(
     )
     console.print(f"  [dim]{all_yml_path}[/dim]")
 
-    inventory_path = write_inventory_yml(pxe_server_ip=pxe_ip, pi_user=pi_user)
+    inventory_path = write_inventory_yml(pi_hostname=pi_hostname, pi_user=pi_user)
     console.print(f"  [dim]{inventory_path}[/dim]")
 
     # ---- Summary ----
     table = Table(title="Configuration Summary", show_header=False)
     table.add_column("Key", style="cyan")
     table.add_column("Value", style="white")
-    table.add_row("PXE Server IP", pxe_ip)
+    table.add_row("Pi Hostname", pi_hostname)
     table.add_row("Pi User", pi_user)
     table.add_row("Target Hostname", hostname)
     table.add_row("Target Username", username)
@@ -321,7 +318,12 @@ def configure(
     console.print()
     console.print(table)
 
-    console.print(Panel("[bold green]Configuration complete![/bold green]", title="Done"))
+    console.print(Panel(
+        "[bold green]Configuration complete![/bold green]\n\n"
+        "PXE server IP is auto-detected at Ansible runtime.\n"
+        "No need to know it in advance.",
+        title="Done",
+    ))
 
 
 if __name__ == "__main__":

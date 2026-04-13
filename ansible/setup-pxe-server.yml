@@ -128,7 +128,7 @@
     - name: Create GRUB config
       copy:
         content: |
-          linux /vmlinuz ip=dhcp url=http://{{ pxe_server_ip }}:8080/{{ ubuntu_iso_filename }} autoinstall "ds=nocloud-net;s=http://{{ pxe_server_ip }}:8080/autoinstall/"
+          linux /vmlinuz ip=dhcp url=http://{{ ansible_default_ipv4.address }}:8080/{{ ubuntu_iso_filename }} autoinstall "ds=nocloud-net;s=http://{{ ansible_default_ipv4.address }}:8080/autoinstall/"
           initrd /initrd
           boot
         dest: "{{ item }}"
@@ -216,7 +216,7 @@
         content: |
           # ProxyDHCP mode - works alongside existing DHCP
           port=0
-          dhcp-range={{ pxe_server_ip | regex_replace('\.\d+$', '.0') }},proxy
+          dhcp-range={{ ansible_default_ipv4.network }},proxy
 
           # Only serve PXE to tagged machines
           {% for client in pxe_clients %}

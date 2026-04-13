@@ -3,5 +3,5 @@
 all:
   hosts:
     pxe-server:
-      ansible_host: $pxe_server_ip
+      ansible_host: $pi_hostname
       ansible_user: $pi_user

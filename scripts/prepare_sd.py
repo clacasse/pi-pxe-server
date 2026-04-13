@@ -25,7 +25,8 @@ from common import (
     prompt_ssh_key,
     validate_mac,
 )
-from configure import write_all_yml, write_inventory_yml, DEFAULT_PACKAGES, generate_password_hash
+from configure import write_all_yml, write_inventory_yml, DEFAULT_PACKAGES
+from common import generate_password_hash
 
 app = typer.Typer(help="Prepare a Raspberry Pi SD card as a PXE server.")
 
@@ -124,7 +125,7 @@ exit 0
 @app.command()
 def prepare(
     boot_path: str = typer.Argument(None, help="Path to the Pi boot partition. Auto-detects if omitted."),
-    pxe_ip: str = typer.Option(None, "--pxe-ip", help="PXE server (Pi) IP address"),
+    pi_hostname: str = typer.Option(None, "--pi-hostname", help="Pi hostname (set in Raspberry Pi Imager)"),
     pi_user: str = typer.Option(None, "--pi-user", help="Pi username (set in Raspberry Pi Imager)"),
     hostname: str = typer.Option(None, "--hostname", help="Target machine hostname"),
     username: str = typer.Option(None, "--username", help="Target machine username"),
@@ -165,8 +166,8 @@ def prepare(
         raise typer.Exit(1)
 
     # ---- Gather config inputs ----
-    if not pxe_ip:
-        pxe_ip = typer.prompt("PXE server (Pi) IP address")
+    if not pi_hostname:
+        pi_hostname = typer.prompt("Pi hostname", default="pxe-server")
 
     if not pi_user:
         pi_user = typer.prompt("Pi username")
@@ -194,8 +195,6 @@ def prepare(
     # ---- Write config files ----
     console.print("Creating configuration...")
     all_yml_path = write_all_yml(
-        pxe_server_ip=pxe_ip,
-        pi_user=pi_user,
         target_hostname=hostname,
         target_username=username,
         password_hash=password_hash,
@@ -206,7 +205,7 @@ def prepare(
     )
     console.print(f"  Config: [dim]{all_yml_path}[/dim]")
 
-    inventory_path = write_inventory_yml(pxe_server_ip=pxe_ip, pi_user=pi_user)
+    inventory_path = write_inventory_yml(pi_hostname=pi_hostname, pi_user=pi_user)
     console.print(f"  Inventory: [dim]{inventory_path}[/dim]")
 
     # ---- Copy to SD card ----
@@ -217,7 +216,7 @@ def prepare(
     table = Table(title="Configuration Summary", show_header=False)
     table.add_column("Key", style="cyan")
     table.add_column("Value", style="white")
-    table.add_row("PXE Server IP", pxe_ip)
+    table.add_row("Pi Hostname", pi_hostname)
     table.add_row("Pi User", pi_user)
     table.add_row("Target Hostname", hostname)
     table.add_row("Target Username", username)
@@ -233,7 +232,7 @@ def prepare(
         "  1. Eject the SD card\n"
         "  2. Insert into Pi and power on (connect ethernet first)\n"
         f"  3. Wait for setup to complete (~30 min, mostly ISO download)\n"
-        f"  4. Monitor: [cyan]ssh {pi_user}@{pxe_ip} 'journalctl -u pxe-firstboot -f'[/cyan]\n"
+        f"  4. Monitor: [cyan]ssh {pi_user}@{pi_hostname} 'journalctl -u pxe-firstboot -f'[/cyan]\n"
         "  5. PXE boot the target machine",
         title="Done",
     ))
