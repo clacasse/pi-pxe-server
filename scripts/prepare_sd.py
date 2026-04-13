@@ -105,21 +105,9 @@ def _inject_cloud_init(user_data: Path) -> None:
 
     pi_user = _detect_pi_user(content)
 
-    # Append ansible to packages (create section if missing)
-    if re.search(r"^packages:\s*$", content, re.MULTILINE):
-        # Packages list exists - insert ansible right after the packages: line
-        content = re.sub(
-            r"^(packages:\s*$)",
-            r"\1\n- ansible",
-            content,
-            count=1,
-            flags=re.MULTILINE,
-        )
-    else:
-        content = content.rstrip() + "\npackages:\n- ansible\n"
-
-    # Build runcmd entries
+    # Build runcmd entries - install ansible inline to avoid timing issues with packages:
     runcmd_lines = [
+        '  - [ sh, -c, "apt-get update && apt-get install -y ansible" ]',
         f'  - [ sh, -c, "cp -r /boot/firmware/pxe-homelab /home/{pi_user}/ 2>/dev/null || cp -r /boot/pxe-homelab /home/{pi_user}/" ]',
         f'  - [ chown, -R, "{pi_user}:{pi_user}", "/home/{pi_user}/pxe-homelab" ]',
         f'  - [ sh, -c, "cd /home/{pi_user}/pxe-homelab && ansible-playbook -i localhost, -c local ansible/setup-pxe-server.yml > /var/log/pxe-setup.log 2>&1" ]',
