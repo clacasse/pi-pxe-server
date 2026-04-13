@@ -34,7 +34,8 @@ Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/):
 ```bash
 git clone git@github.com:clacasse/pxe-homelab.git
 cd pxe-homelab
-./scripts/prepare-sd.sh
+pip install typer rich
+python scripts/prepare_sd.py
 ```
 
 The script will:
@@ -42,6 +43,18 @@ The script will:
 - Prompt for target machine config (hostname, username, password, MAC address)
 - Generate the password hash
 - Copy everything to the SD card
+
+All options can also be passed as flags for non-interactive use:
+
+```bash
+python scripts/prepare_sd.py /mnt/d \
+    --pxe-ip 192.168.1.219 \
+    --hostname server-01 \
+    --username admin \
+    --mac aa:bb:cc:dd:ee:ff \
+    --ssh-key ~/.ssh/id_ed25519.pub \
+    -y
+```
 
 Works on **Linux**, **macOS**, and **WSL**.
 
@@ -97,7 +110,8 @@ pxe-homelab/
 │       ├── all.yml.example        # Template config
 │       └── all.yml                # Your config (gitignored)
 ├── scripts/
-│   ├── prepare-sd.sh              # Interactive SD card setup
+│   ├── prepare_sd.py              # Interactive SD card setup (typer CLI)
+│   ├── prepare-sd.sh              # Bash alternative
 │   ├── firstboot.sh               # Runs on Pi's first boot
 │   ├── bootstrap.sh               # Manual alternative to firstboot
 │   └── pxe-firstboot.service      # systemd unit for firstboot

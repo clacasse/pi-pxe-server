@@ -1,0 +1,12 @@
+[project]
+name = "pxe-homelab"
+version = "0.1.0"
+description = "Automated PXE server setup for bare metal Ubuntu provisioning"
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+prepare-sd = "scripts.prepare_sd:app"
