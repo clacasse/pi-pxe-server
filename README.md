@@ -126,7 +126,7 @@ Edit `ansible/group_vars/all.yml` to change:
 
 ## Troubleshooting
 
-See the [full troubleshooting guide](docs/troubleshooting.md) or check:
+Check the logs:
 - dnsmasq logs: `sudo journalctl -u dnsmasq -f`
 - nginx logs: `sudo journalctl -u nginx -f`
 - firstboot logs: `sudo journalctl -u pxe-firstboot -f`
