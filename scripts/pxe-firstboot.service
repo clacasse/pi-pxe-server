@@ -1,0 +1,15 @@
+[Unit]
+Description=PXE Server First Boot Setup
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/boot/firmware/pxe-homelab
+
+[Service]
+Type=oneshot
+ExecStart=/boot/firmware/pxe-firstboot.sh
+RemainAfterExit=yes
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

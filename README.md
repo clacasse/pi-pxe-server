@@ -23,40 +23,44 @@ From a fresh Raspberry Pi and a bare metal PC, this repo sets up:
 
 Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/):
 - OS: **Raspberry Pi OS Lite (64-bit)**
-- Enable SSH, set hostname to `pxe-server`, set username/password
-- Connect via ethernet, boot up
+- Enable SSH, set hostname to `pxe-server`, set username `pi` + password
+- Skip WiFi (use ethernet)
+- Flash the SD card, but **don't eject yet**
 
-### Step 2: Bootstrap the PXE Server
-
-From any machine with Ansible installed and SSH access to the Pi:
+### Step 2: Prepare the SD Card
 
 ```bash
-git clone https://github.com/YOURUSERNAME/pxe-homelab.git
+git clone git@github.com:clacasse/pxe-homelab.git
 cd pxe-homelab
 
-# Edit config for your environment
+# Create your config
 cp ansible/group_vars/all.yml.example ansible/group_vars/all.yml
 # Edit all.yml with your IP, MAC address, SSH key, etc.
 
-# Run the playbook
-ansible-playbook -i ansible/inventory.yml ansible/setup-pxe-server.yml
+# Copy repo and firstboot service to the SD card boot partition
+./scripts/prepare-sd.sh /path/to/boot/partition
 ```
 
-This will:
-- Install dnsmasq and Docker on the Pi
-- Download Ubuntu 24.04 ISO (~2.6GB)
-- Extract bootloader files
-- Configure GRUB, autoinstall, and TFTP
-- Start nginx for HTTP serving
+Eject the SD card and insert into the Pi.
 
-### Step 3: PXE Boot the GPU Workstation
+### Step 3: Boot the Pi
+
+Power on the Pi. It will automatically:
+1. Boot and configure the user (from Pi Imager settings)
+2. Install Ansible and git
+3. Run the PXE server playbook
+4. Download Ubuntu ISO (~2.6GB)
+
+Monitor progress: `ssh pi@pxe-server 'journalctl -u pxe-firstboot -f'`
+
+### Step 4: PXE Boot the GPU Workstation
 
 1. Ensure the workstation's MAC is listed in `ansible/group_vars/all.yml`
-2. Power on the workstation
+2. Power on the workstation (BIOS set to PXE boot first, Secure Boot off)
 3. It will PXE boot, install Ubuntu headlessly, and reboot
 4. SSH in: `ssh chris@ollama-server`
 
-### Step 4: Provision the GPU Workstation (TODO)
+### Step 5: Provision the GPU Workstation (TODO)
 
 ```bash
 ansible-playbook -i ansible/inventory.yml ansible/site.yml
