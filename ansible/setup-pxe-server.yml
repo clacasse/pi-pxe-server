@@ -19,22 +19,8 @@
       apt:
         name:
           - dnsmasq
-          - docker.io
-          - docker-compose
-          - python3-docker
+          - nginx
         state: present
-
-    - name: Add user to docker group
-      user:
-        name: "{{ ansible_user }}"
-        groups: docker
-        append: yes
-
-    - name: Enable and start Docker
-      systemd:
-        name: docker
-        enabled: yes
-        state: started
 
     # ==================== Directory Structure ====================
     - name: Create PXE directory structure
@@ -251,28 +237,37 @@
         enabled: yes
         state: started
 
-    # ==================== nginx (Docker) ====================
-    - name: Create docker-compose.yml
+    # ==================== nginx ====================
+    - name: Configure nginx to serve PXE files
       copy:
         content: |
-          services:
-            nginx:
-              image: nginx:alpine
-              container_name: pxe-http
-              ports:
-                - "8080:80"
-              volumes:
-                - ./http:/usr/share/nginx/html:ro
-              restart: unless-stopped
-        dest: "{{ pxe_home }}/docker-compose.yml"
-        owner: "{{ ansible_user }}"
-        group: "{{ ansible_user }}"
+          server {
+              listen 8080;
+              server_name _;
+              root {{ pxe_home }}/http;
+              autoindex on;
+          }
+        dest: /etc/nginx/sites-available/pxe
+      notify: restart nginx
 
-    - name: Start nginx container
-      shell: docker compose up -d
-      args:
-        chdir: "{{ pxe_home }}"
-      become_user: "{{ ansible_user }}"
+    - name: Enable PXE nginx site
+      file:
+        src: /etc/nginx/sites-available/pxe
+        dest: /etc/nginx/sites-enabled/pxe
+        state: link
+      notify: restart nginx
+
+    - name: Remove default nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: restart nginx
+
+    - name: Enable and start nginx
+      systemd:
+        name: nginx
+        enabled: yes
+        state: started
 
     # ==================== Cleanup ====================
     - name: Remove temporary files
@@ -296,7 +291,6 @@
         url: "http://localhost:8080/autoinstall/user-data"
         return_content: no
       register: nginx_check
-      delegate_to: "{{ inventory_hostname }}"
 
     - name: PXE server ready
       debug:
@@ -323,4 +317,9 @@
     - name: restart dnsmasq
       systemd:
         name: dnsmasq
+        state: restarted
+
+    - name: restart nginx
+      systemd:
+        name: nginx
         state: restarted

@@ -74,7 +74,8 @@ BIOS is set to PXE boot first on all managed machines. The PXE server controls w
 ```
 ┌──────────────────────────────────────────────┐
 │  Raspberry Pi (PXE Server)                   │
-│  dnsmasq (proxyDHCP + TFTP) + nginx (HTTP)  │
+│  dnsmasq (proxyDHCP + TFTP)                 │
+│  nginx (HTTP on port 8080)                   │
 └─────────────────────┬────────────────────────┘
                       │
         Network (existing DHCP from router)
