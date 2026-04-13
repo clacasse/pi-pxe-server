@@ -1,0 +1,14 @@
+# Ansible
+ansible/group_vars/all.yml
+*.retry
+
+# Large files - downloaded at setup time
+http/*.iso
+tftp/vmlinuz
+tftp/initrd
+tftp/grubnetx64.efi
+tftp/grub/x86_64-efi/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,37 @@
+# PXE Server Configuration
+# Copy this to all.yml and edit for your environment
+
+# PXE server (Raspberry Pi) IP address
+pxe_server_ip: "192.168.1.219"
+
+# Ubuntu version to serve
+ubuntu_version: "24.04.2"
+
+# GRUB netboot binary URLs (from Ubuntu package repos)
+grub_signed_deb_url: "http://archive.ubuntu.com/ubuntu/pool/main/g/grub2-signed/grub-efi-amd64-signed_1.202+2.12-1ubuntu7_amd64.deb"
+grub_modules_deb_url: "http://archive.ubuntu.com/ubuntu/pool/main/g/grub2-unsigned/grub-efi-amd64-bin_2.12-1ubuntu7_amd64.deb"
+
+# Machines to PXE boot
+# Add MAC addresses here to enable PXE booting
+# Remove/comment out to stop PXE booting (machine boots from local disk)
+pxe_clients:
+  - mac: "50:eb:f6:cd:e2:db"
+    name: "gpu-workstation"
+
+# Target machine configuration (used in autoinstall)
+target_hostname: "ollama-server"
+target_username: "chris"
+# Generate with: mkpasswd --method=SHA-512 "yourpassword"
+target_password_hash: "$6$Btih7hxr/lBKEx.Q$cHJ9FH15VJKy4SI./28dZl4EU26LMoJd035VgEZRc5QZsZGTmGSWek6hz8JpJhzpdwGdASd37Dyoshwv5pnVW0"
+target_ssh_authorized_keys:
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKMVNejJiYlNgDq6Bl7wvFM/YOaCLQFPBI0Ria3ojNYs chris.lacasse@gmail.com"
+
+# Packages to install on the target machine during autoinstall
+target_packages:
+  - ubuntu-drivers-common
+  - build-essential
+  - curl
+  - git
+  - python3-pip
+  - ansible
+  - jq

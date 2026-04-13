@@ -1,0 +1,326 @@
+---
+- name: Configure Raspberry Pi as PXE Server
+  hosts: pxe-server
+  become: true
+
+  vars:
+    pxe_home: "/home/{{ ansible_user }}/pxe-homelab"
+    ubuntu_iso_url: "https://releases.ubuntu.com/{{ ubuntu_version }}/ubuntu-{{ ubuntu_version }}-live-server-amd64.iso"
+    ubuntu_iso_filename: "ubuntu-{{ ubuntu_version }}-live-server-amd64.iso"
+
+  tasks:
+    # ==================== System Setup ====================
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install required packages
+      apt:
+        name:
+          - dnsmasq
+          - docker.io
+          - docker-compose
+          - python3-docker
+        state: present
+
+    - name: Add user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    - name: Enable and start Docker
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+
+    # ==================== Directory Structure ====================
+    - name: Create PXE directory structure
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+      loop:
+        - "{{ pxe_home }}"
+        - "{{ pxe_home }}/tftp"
+        - "{{ pxe_home }}/tftp/grub"
+        - "{{ pxe_home }}/tftp/boot/grub"
+        - "{{ pxe_home }}/http"
+        - "{{ pxe_home }}/http/autoinstall"
+
+    - name: Ensure home directory is traversable for dnsmasq
+      file:
+        path: "/home/{{ ansible_user }}"
+        mode: '0755'
+
+    # ==================== Download Ubuntu ISO ====================
+    - name: Download Ubuntu ISO (this takes a while)
+      get_url:
+        url: "{{ ubuntu_iso_url }}"
+        dest: "{{ pxe_home }}/http/{{ ubuntu_iso_filename }}"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+
+    - name: Check if bootloader files already extracted
+      stat:
+        path: "{{ pxe_home }}/tftp/vmlinuz"
+      register: vmlinuz_stat
+
+    - name: Create ISO mount point
+      file:
+        path: /mnt/iso
+        state: directory
+      when: not vmlinuz_stat.stat.exists
+
+    - name: Mount Ubuntu ISO
+      mount:
+        path: /mnt/iso
+        src: "{{ pxe_home }}/http/{{ ubuntu_iso_filename }}"
+        fstype: iso9660
+        opts: loop,ro
+        state: mounted
+      when: not vmlinuz_stat.stat.exists
+
+    - name: Copy kernel and initrd from ISO
+      copy:
+        src: "/mnt/iso/casper/{{ item }}"
+        dest: "{{ pxe_home }}/tftp/{{ item }}"
+        remote_src: yes
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+      loop:
+        - vmlinuz
+        - initrd
+      when: not vmlinuz_stat.stat.exists
+
+    - name: Unmount Ubuntu ISO
+      mount:
+        path: /mnt/iso
+        state: absent
+
+    # ==================== GRUB Netboot Binary ====================
+    - name: Check if GRUB netboot binary exists
+      stat:
+        path: "{{ pxe_home }}/tftp/grubnetx64.efi"
+      register: grub_stat
+
+    - name: Download GRUB signed .deb
+      get_url:
+        url: "{{ grub_signed_deb_url }}"
+        dest: /tmp/grub-efi-amd64-signed.deb
+      when: not grub_stat.stat.exists
+
+    - name: Extract GRUB signed binary
+      shell: |
+        mkdir -p /tmp/grub-extract
+        dpkg -x /tmp/grub-efi-amd64-signed.deb /tmp/grub-extract
+        cp /tmp/grub-extract/usr/lib/grub/x86_64-efi-signed/grubnetx64.efi.signed \
+           {{ pxe_home }}/tftp/grubnetx64.efi
+        chown {{ ansible_user }}:{{ ansible_user }} {{ pxe_home }}/tftp/grubnetx64.efi
+      when: not grub_stat.stat.exists
+
+    - name: Download GRUB modules .deb
+      get_url:
+        url: "{{ grub_modules_deb_url }}"
+        dest: /tmp/grub-efi-amd64-bin.deb
+      when: not grub_stat.stat.exists
+
+    - name: Extract GRUB modules
+      shell: |
+        mkdir -p /tmp/grub-bin-extract
+        dpkg -x /tmp/grub-efi-amd64-bin.deb /tmp/grub-bin-extract
+        cp -r /tmp/grub-bin-extract/usr/lib/grub/x86_64-efi \
+           {{ pxe_home }}/tftp/grub/x86_64-efi
+        chown -R {{ ansible_user }}:{{ ansible_user }} {{ pxe_home }}/tftp/grub/x86_64-efi
+      when: not grub_stat.stat.exists
+
+    # ==================== GRUB Config ====================
+    - name: Create GRUB config
+      copy:
+        content: |
+          linux /vmlinuz ip=dhcp url=http://{{ pxe_server_ip }}:8080/{{ ubuntu_iso_filename }} autoinstall "ds=nocloud-net;s=http://{{ pxe_server_ip }}:8080/autoinstall/"
+          initrd /initrd
+          boot
+        dest: "{{ item }}"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+      loop:
+        - "{{ pxe_home }}/tftp/grub/grub.cfg"
+        - "{{ pxe_home }}/tftp/boot/grub/grub.cfg"
+
+    # ==================== Autoinstall Config ====================
+    - name: Create autoinstall user-data
+      copy:
+        content: |
+          #cloud-config
+          autoinstall:
+            version: 1
+            interactive-sections: []
+            locale: en_US.UTF-8
+            keyboard:
+              layout: us
+            storage:
+              layout:
+                name: lvm
+                sizing-policy: all
+            identity:
+              hostname: {{ target_hostname }}
+              username: {{ target_username }}
+              password: "{{ target_password_hash }}"
+            ssh:
+              install-server: true
+              allow-pw: true
+              authorized-keys:
+          {% for key in target_ssh_authorized_keys %}
+                - {{ key }}
+          {% endfor %}
+            packages:
+          {% for pkg in target_packages %}
+              - {{ pkg }}
+          {% endfor %}
+            late-commands:
+              - curtin in-target -- ubuntu-drivers install --gpgpu
+            shutdown: reboot
+        dest: "{{ pxe_home }}/http/autoinstall/user-data"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+
+    - name: Create autoinstall meta-data
+      copy:
+        content: |
+          instance-id: {{ target_hostname }}
+          local-hostname: {{ target_hostname }}
+        dest: "{{ pxe_home }}/http/autoinstall/meta-data"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+
+    - name: Create empty vendor-data
+      file:
+        path: "{{ pxe_home }}/http/autoinstall/vendor-data"
+        state: touch
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+
+    # ==================== dnsmasq ====================
+    - name: Create TFTP symlink
+      file:
+        src: "{{ pxe_home }}/tftp"
+        dest: /srv/tftp
+        state: link
+        force: yes
+
+    - name: Remove default dnsmasq.d configs
+      file:
+        path: /etc/dnsmasq.d
+        state: "{{ item }}"
+      loop:
+        - absent
+        - directory
+
+    - name: Configure dnsmasq
+      copy:
+        content: |
+          # ProxyDHCP mode - works alongside existing DHCP
+          port=0
+          dhcp-range=192.168.1.0,proxy
+
+          # Only serve PXE to tagged machines
+          {% for client in pxe_clients %}
+          dhcp-host={{ client.mac }},set:pxe  # {{ client.name }}
+          {% endfor %}
+
+          # PXE boot settings - only for tagged hosts
+          dhcp-boot=tag:pxe,grubnetx64.efi
+          pxe-service=tag:pxe,x86-64_EFI,"Network Boot",grubnetx64.efi
+
+          enable-tftp
+          tftp-root=/srv/tftp
+
+          log-dhcp
+          log-queries
+        dest: /etc/dnsmasq.conf
+      notify: restart dnsmasq
+
+    - name: Enable and start dnsmasq
+      systemd:
+        name: dnsmasq
+        enabled: yes
+        state: started
+
+    # ==================== nginx (Docker) ====================
+    - name: Create docker-compose.yml
+      copy:
+        content: |
+          services:
+            nginx:
+              image: nginx:alpine
+              container_name: pxe-http
+              ports:
+                - "8080:80"
+              volumes:
+                - ./http:/usr/share/nginx/html:ro
+              restart: unless-stopped
+        dest: "{{ pxe_home }}/docker-compose.yml"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+
+    - name: Start nginx container
+      shell: docker compose up -d
+      args:
+        chdir: "{{ pxe_home }}"
+      become_user: "{{ ansible_user }}"
+
+    # ==================== Cleanup ====================
+    - name: Remove temporary files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/grub-efi-amd64-signed.deb
+        - /tmp/grub-efi-amd64-bin.deb
+        - /tmp/grub-extract
+        - /tmp/grub-bin-extract
+
+    # ==================== Verification ====================
+    - name: Verify dnsmasq is running
+      systemd:
+        name: dnsmasq
+      register: dnsmasq_status
+
+    - name: Verify nginx is serving
+      uri:
+        url: "http://localhost:8080/autoinstall/user-data"
+        return_content: no
+      register: nginx_check
+      delegate_to: "{{ inventory_hostname }}"
+
+    - name: PXE server ready
+      debug:
+        msg: |
+          ============================================
+          PXE Server Setup Complete!
+          ============================================
+          dnsmasq: {{ dnsmasq_status.status.ActiveState }}
+          nginx: {{ 'running' if nginx_check.status == 200 else 'NOT RUNNING' }}
+
+          PXE clients configured:
+          {% for client in pxe_clients %}
+            - {{ client.name }} ({{ client.mac }})
+          {% endfor %}
+
+          To re-image a machine:
+            1. Ensure MAC is in pxe_clients
+            2. Set BIOS to PXE boot first
+            3. Disable Secure Boot
+            4. Power on
+          ============================================
+
+  handlers:
+    - name: restart dnsmasq
+      systemd:
+        name: dnsmasq
+        state: restarted
