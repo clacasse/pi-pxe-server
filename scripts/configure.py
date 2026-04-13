@@ -26,7 +26,6 @@ from common import (
     generate_password_hash,
     prompt_password,
     prompt_ssh_key,
-    validate_mac,
     yaml_list,
 )
 
@@ -73,10 +72,8 @@ def render_template(template_name: str, variables: dict) -> str:
 
 
 def write_all_yml(
-    target_hostname: str,
     target_username: str,
     password_hash: str,
-    pxe_clients: list[dict],
     ssh_keys: list[str],
     packages: list[str],
     late_commands: list[str],
@@ -86,30 +83,16 @@ def write_all_yml(
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Format list fields as YAML
-    if pxe_clients:
-        pxe_clients_yaml = "\n".join(
-            f'  - mac: "{c["mac"]}"\n    name: "{c["name"]}"' for c in pxe_clients
-        )
-    else:
-        pxe_clients_yaml = "  []"
-
-    ssh_keys_yaml = yaml_list(ssh_keys)
-    packages_yaml = yaml_list(packages)
-    late_commands_yaml = yaml_list(late_commands)
-
     variables = {
         "timestamp": timestamp,
         "ubuntu_version": ubuntu_version,
         "grub_signed_deb_url": GRUB_SIGNED_DEB_URL,
         "grub_modules_deb_url": GRUB_MODULES_DEB_URL,
-        "pxe_clients": pxe_clients_yaml,
-        "target_hostname": target_hostname,
         "target_username": target_username,
         "target_password_hash": password_hash,
-        "target_ssh_authorized_keys": ssh_keys_yaml,
-        "target_packages": packages_yaml,
-        "target_late_commands": late_commands_yaml,
+        "target_ssh_authorized_keys": yaml_list(ssh_keys),
+        "target_packages": yaml_list(packages),
+        "target_late_commands": yaml_list(late_commands),
     }
 
     config_path = CONFIG_DIR / "all.yml"
@@ -129,32 +112,6 @@ def write_inventory_yml(pi_hostname: str, pi_user: str) -> Path:
     inventory_path = REPO_DIR / "ansible" / "inventory.yml"
     inventory_path.write_text(render_template("inventory.yml.tpl", variables))
     return inventory_path
-
-
-def collect_pxe_clients(existing: list[dict] | None = None) -> list[dict]:
-    """Interactively collect PXE client MAC/name pairs."""
-    clients = []
-
-    if existing:
-        console.print("\n[bold]Current PXE clients:[/bold]")
-        for c in existing:
-            console.print(f"  {c['name']} ({c['mac']})")
-        if typer.confirm("Keep existing clients?", default=True):
-            clients = list(existing)
-
-    while True:
-        if clients:
-            if not typer.confirm("Add another PXE client?", default=False):
-                break
-        else:
-            console.print("\n[bold]PXE Clients[/bold] (machines to install via PXE)")
-
-        mac = typer.prompt("  MAC address (aa:bb:cc:dd:ee:ff)")
-        mac = validate_mac(mac)
-        name = typer.prompt("  Hostname for this machine")
-        clients.append({"mac": mac, "name": name})
-
-    return clients
 
 
 def collect_packages(existing: list[str] | None = None) -> list[str]:
@@ -196,10 +153,8 @@ def collect_late_commands(existing: list[str] | None = None) -> list[str]:
 def configure(
     pi_hostname: str = typer.Option(None, "--pi-hostname", help="Pi hostname (for remote Ansible access)"),
     pi_user: str = typer.Option(None, "--pi-user", help="Pi username (set in Raspberry Pi Imager)"),
-    hostname: str = typer.Option(None, "--hostname", help="Target machine hostname"),
     username: str = typer.Option(None, "--username", help="Target machine username"),
     password: str = typer.Option(None, "--password", help="Target machine password (hashed automatically)"),
-    mac: str = typer.Option(None, "--mac", help="Target machine MAC address"),
     ssh_key: str = typer.Option(None, "--ssh-key", help="SSH public key (raw string)"),
     ssh_key_file: str = typer.Option(None, "--ssh-key-file", help="Path to SSH public key file"),
     packages: str = typer.Option(None, "--packages", help="Comma-separated list of packages"),
@@ -235,9 +190,7 @@ def configure(
 
     # ---- Target machine config ----
     console.print("\n[bold]Target Machine Configuration[/bold]")
-
-    if not hostname:
-        hostname = typer.prompt("Hostname", default=default("target_hostname") or None)
+    console.print("[dim]These settings apply to all machines installed via PXE.[/dim]")
 
     if not username:
         username = typer.prompt("Username", default=default("target_username") or None)
@@ -246,15 +199,6 @@ def configure(
 
     # SSH key
     ssh_key_resolved = prompt_ssh_key(ssh_key, ssh_key_file, non_interactive)
-
-    # PXE clients
-    if mac:
-        pxe_clients = [{"mac": validate_mac(mac), "name": hostname}]
-    elif non_interactive:
-        pxe_clients = []
-    else:
-        existing_clients = existing.get("pxe_clients") if existing else None
-        pxe_clients = collect_pxe_clients(existing_clients)
 
     # Packages
     if packages:
@@ -288,10 +232,8 @@ def configure(
     console.print("Writing configuration files...")
 
     all_yml_path = write_all_yml(
-        target_hostname=hostname,
         target_username=username,
         password_hash=password_hash,
-        pxe_clients=pxe_clients,
         ssh_keys=[ssh_key_resolved],
         packages=pkg_list,
         late_commands=cmd_list,
@@ -308,10 +250,8 @@ def configure(
     table.add_column("Value", style="white")
     table.add_row("Pi Hostname", pi_hostname)
     table.add_row("Pi User", pi_user)
-    table.add_row("Target Hostname", hostname)
     table.add_row("Target Username", username)
     table.add_row("SSH Key", ssh_key_resolved[:50] + "..." if len(ssh_key_resolved) > 50 else ssh_key_resolved)
-    table.add_row("PXE Clients", ", ".join(f"{c['name']} ({c['mac']})" for c in pxe_clients) or "none")
     table.add_row("Packages", ", ".join(pkg_list))
     table.add_row("Late Commands", str(len(cmd_list)) + " configured" if cmd_list else "none")
     table.add_row("Ubuntu Version", ubuntu_version)
@@ -320,8 +260,9 @@ def configure(
 
     console.print(Panel(
         "[bold green]Configuration complete![/bold green]\n\n"
-        "PXE server IP is auto-detected at Ansible runtime.\n"
-        "No need to know it in advance.",
+        "PXE server will serve any machine that network boots.\n"
+        "Server IP is auto-detected at runtime.\n"
+        "Stop PXE serving: [cyan]sudo systemctl stop dnsmasq[/cyan]",
         title="Done",
     ))
 

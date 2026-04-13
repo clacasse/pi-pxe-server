@@ -8,14 +8,7 @@ ubuntu_version: "$ubuntu_version"
 grub_signed_deb_url: "$grub_signed_deb_url"
 grub_modules_deb_url: "$grub_modules_deb_url"
 
-# Machines to PXE boot
-# Add MAC addresses here to enable PXE booting
-# Remove/comment out to stop PXE booting (machine boots from local disk)
-pxe_clients:
-$pxe_clients
-
 # Target machine configuration (used in autoinstall)
-target_hostname: "$target_hostname"
 target_username: "$target_username"
 target_password_hash: "$target_password_hash"
 target_ssh_authorized_keys:

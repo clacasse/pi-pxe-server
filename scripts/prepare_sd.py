@@ -21,12 +21,11 @@ except ImportError:
 from common import (
     REPO_DIR,
     console,
+    generate_password_hash,
     prompt_password,
     prompt_ssh_key,
-    validate_mac,
 )
 from configure import write_all_yml, write_inventory_yml, DEFAULT_PACKAGES
-from common import generate_password_hash
 
 app = typer.Typer(help="Prepare a Raspberry Pi SD card as a PXE server.")
 
@@ -127,10 +126,8 @@ def prepare(
     boot_path: str = typer.Argument(None, help="Path to the Pi boot partition. Auto-detects if omitted."),
     pi_hostname: str = typer.Option(None, "--pi-hostname", help="Pi hostname (set in Raspberry Pi Imager)"),
     pi_user: str = typer.Option(None, "--pi-user", help="Pi username (set in Raspberry Pi Imager)"),
-    hostname: str = typer.Option(None, "--hostname", help="Target machine hostname"),
     username: str = typer.Option(None, "--username", help="Target machine username"),
     password: str = typer.Option(None, "--password", help="Target machine password"),
-    mac: str = typer.Option(None, "--mac", help="Target machine MAC address"),
     ssh_key: str = typer.Option(None, "--ssh-key", help="SSH public key (raw string)"),
     ssh_key_file: str = typer.Option(None, "--ssh-key-file", help="Path to SSH public key file"),
     non_interactive: bool = typer.Option(False, "--yes", "-y", help="Skip confirmations"),
@@ -166,6 +163,8 @@ def prepare(
         raise typer.Exit(1)
 
     # ---- Gather config inputs ----
+    console.print("\n[bold]PXE Server (Raspberry Pi)[/bold]")
+
     if not pi_hostname:
         pi_hostname = typer.prompt("Pi hostname", default="pxe-server")
 
@@ -173,18 +172,12 @@ def prepare(
         pi_user = typer.prompt("Pi username")
 
     console.print("\n[bold]Target Machine Configuration[/bold]")
-
-    if not hostname:
-        hostname = typer.prompt("Hostname")
+    console.print("[dim]These settings apply to all machines installed via PXE.[/dim]")
 
     if not username:
         username = typer.prompt("Username")
 
     resolved_password = prompt_password(password)
-
-    if not mac:
-        mac = typer.prompt("MAC address (aa:bb:cc:dd:ee:ff)")
-    mac = validate_mac(mac)
 
     ssh_key_resolved = prompt_ssh_key(ssh_key, ssh_key_file, non_interactive)
 
@@ -195,10 +188,8 @@ def prepare(
     # ---- Write config files ----
     console.print("Creating configuration...")
     all_yml_path = write_all_yml(
-        target_hostname=hostname,
         target_username=username,
         password_hash=password_hash,
-        pxe_clients=[{"mac": mac, "name": hostname}],
         ssh_keys=[ssh_key_resolved],
         packages=DEFAULT_PACKAGES,
         late_commands=[],
@@ -218,9 +209,7 @@ def prepare(
     table.add_column("Value", style="white")
     table.add_row("Pi Hostname", pi_hostname)
     table.add_row("Pi User", pi_user)
-    table.add_row("Target Hostname", hostname)
     table.add_row("Target Username", username)
-    table.add_row("Target MAC", mac)
     table.add_row("SSH Key", ssh_key_resolved[:50] + "..." if len(ssh_key_resolved) > 50 else ssh_key_resolved)
     table.add_row("Boot Partition", str(boot_mount))
     console.print()
@@ -231,9 +220,9 @@ def prepare(
         "Next steps:\n"
         "  1. Eject the SD card\n"
         "  2. Insert into Pi and power on (connect ethernet first)\n"
-        f"  3. Wait for setup to complete (~30 min, mostly ISO download)\n"
+        "  3. Wait for setup to complete (~30 min, mostly ISO download)\n"
         f"  4. Monitor: [cyan]ssh {pi_user}@{pi_hostname} 'journalctl -u pxe-firstboot -f'[/cyan]\n"
-        "  5. PXE boot the target machine",
+        "  5. PXE boot any machine on the network",
         title="Done",
     ))
 

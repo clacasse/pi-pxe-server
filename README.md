@@ -43,20 +43,20 @@ python scripts/prepare_sd.py
 
 The script will prompt you for:
 - Pi hostname and username (as set in Raspberry Pi Imager)
-- Target machine hostname, username, password, MAC address
+- Target machine username and password (applies to all PXE-installed machines)
 - SSH public key (auto-detected if available)
 
-The PXE server IP is auto-detected at runtime — no need to know it in advance.
+No MAC addresses or hostnames needed — PXE serves any machine that requests it.
 
 All options can also be passed as flags for non-interactive use:
 
 ```bash
 python scripts/prepare_sd.py /path/to/boot/partition \
     --pi-hostname pxe-server \
-    --hostname <target-hostname> \
-    --username <target-username> \
-    --mac <target-mac> \
-    --ssh-key ~/.ssh/id_ed25519.pub \
+    --pi-user pi \
+    --username admin \
+    --password "secret" \
+    --ssh-key-file ~/.ssh/id_ed25519.pub \
     -y
 ```
 
@@ -74,16 +74,16 @@ Works on **Linux**, **macOS**, and **WSL**.
 1. Connect target machine via ethernet
 2. Power on - it will PXE boot and install Ubuntu automatically
 3. Wait ~20-30 min for install to complete
-4. SSH in: `ssh <username>@<hostname>`
+4. SSH in: `ssh <username>@<machine-ip>`
 
 ## How PXE Boot Control Works
 
-BIOS is set to PXE boot first on all managed machines. The PXE server controls which machines get re-imaged:
+The PXE server serves any machine that network boots. Control it by starting/stopping dnsmasq:
 
-- **Normal boot**: dnsmasq ignores the PXE request, machine boots from local disk (~3 sec delay)
-- **Re-image**: MAC is listed in config, dnsmasq responds, Ubuntu installs automatically
+- **PXE on**: `sudo systemctl start dnsmasq` — any machine that PXE boots gets Ubuntu installed
+- **PXE off**: `sudo systemctl stop dnsmasq` — machines boot from local disk normally
 
-To re-image a machine later, add its MAC to `ansible/group_vars/all.yml` under `pxe_clients` and restart dnsmasq on the Pi.
+Set BIOS to PXE boot first on machines you want to manage. When dnsmasq is stopped, PXE times out in ~3 seconds and the machine boots from local disk.
 
 ## Architecture
 
@@ -138,9 +138,9 @@ python scripts/configure.py --edit
 
 # Non-interactive
 python scripts/configure.py \
-    --pi-hostname pxe-server --pi-user <user> \
-    --hostname <host> --username <user> --password <pass> \
-    --mac <mac> --ssh-key-file ~/.ssh/id_ed25519.pub \
+    --pi-hostname pxe-server --pi-user pi \
+    --username admin --password "secret" \
+    --ssh-key-file ~/.ssh/id_ed25519.pub \
     --packages curl,git,ansible,jq \
     -y
 ```

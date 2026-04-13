@@ -154,7 +154,6 @@
                 name: lvm
                 sizing-policy: all
             identity:
-              hostname: {{ target_hostname }}
               username: {{ target_username }}
               password: "{{ target_password_hash }}"
             ssh:
@@ -182,8 +181,8 @@
     - name: Create autoinstall meta-data
       copy:
         content: |
-          instance-id: {{ target_hostname }}
-          local-hostname: {{ target_hostname }}
+          instance-id: pxe-install
+          local-hostname: ubuntu
         dest: "{{ pxe_home }}/http/autoinstall/meta-data"
         owner: "{{ ansible_user }}"
         group: "{{ ansible_user }}"
@@ -218,14 +217,9 @@
           port=0
           dhcp-range={{ ansible_default_ipv4.network }},proxy
 
-          # Only serve PXE to tagged machines
-          {% for client in pxe_clients %}
-          dhcp-host={{ client.mac }},set:pxe  # {{ client.name }}
-          {% endfor %}
-
-          # PXE boot settings - only for tagged hosts
-          dhcp-boot=tag:pxe,grubnetx64.efi
-          pxe-service=tag:pxe,x86-64_EFI,"Network Boot",grubnetx64.efi
+          # PXE boot settings - serve any machine that requests it
+          dhcp-boot=grubnetx64.efi
+          pxe-service=x86-64_EFI,"Network Boot",grubnetx64.efi
 
           enable-tftp
           tftp-root=/srv/tftp
@@ -305,16 +299,12 @@
           dnsmasq: {{ dnsmasq_status.status.ActiveState }}
           nginx: {{ 'running' if nginx_check.status == 200 else 'NOT RUNNING' }}
 
-          PXE clients configured:
-          {% for client in pxe_clients %}
-            - {{ client.name }} ({{ client.mac }})
-          {% endfor %}
-
+          PXE is serving all machines on the network.
           To re-image a machine:
-            1. Ensure MAC is in pxe_clients
-            2. Set BIOS to PXE boot first
-            3. Disable Secure Boot
-            4. Power on
+            1. Set BIOS to PXE boot first
+            2. Disable Secure Boot
+            3. Power on
+          To stop serving PXE: sudo systemctl stop dnsmasq
           ============================================
 
   handlers:
