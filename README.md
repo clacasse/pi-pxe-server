@@ -115,7 +115,6 @@ pxe-homelab/
 │   ├── firstboot.sh               # Runs on Pi's first boot
 │   ├── bootstrap.sh               # Manual alternative to firstboot
 │   └── pxe-firstboot.service      # systemd unit for firstboot
-└── k8s/                           # Optional k8s manifests
 ```
 
 ## Customization
