@@ -20,6 +20,14 @@ NETWORK=$(echo "$PI_IP" | sed 's|\.[0-9]*$|.0|')
 echo "Pi IP: $PI_IP"
 echo "Network: $NETWORK"
 
+# ---- Wait for network + install packages ----
+echo "Waiting for network..."
+until ping -c1 -W2 archive.ubuntu.com &>/dev/null; do sleep 2; done
+
+echo "Installing packages..."
+apt-get update
+apt-get install -y dnsmasq nginx wget
+
 # ---- Directory structure ----
 mkdir -p /srv/http/autoinstall
 mkdir -p /srv/tftp/grub

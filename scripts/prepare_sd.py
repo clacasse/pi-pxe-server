@@ -148,21 +148,9 @@ def _inject_cloud_init(user_data: Path) -> None:
 
     pi_user = _detect_pi_user(content)
 
-    # Ensure required packages are installed
-    required_packages = ["dnsmasq", "nginx", "wget"]
-    if re.search(r"^packages:\s*$", content, re.MULTILINE):
-        additions = "\n".join(f"- {p}" for p in required_packages)
-        content = re.sub(
-            r"^(packages:\s*$)",
-            lambda m: f"{m.group(1)}\n{additions}",
-            content,
-            count=1,
-            flags=re.MULTILINE,
-        )
-    else:
-        content = content.rstrip() + "\npackages:\n" + "\n".join(f"- {p}" for p in required_packages) + "\n"
-
-    # Add runcmd entries. Match existing list indentation if present.
+    # Add runcmd entries. pi-setup.sh handles apt install itself so we don't rely
+    # on cloud-init's package stage (which has been flaky). Match existing list
+    # indentation if present.
     indent = "  "  # default if no runcmd exists
     runcmd_match = re.search(r"^runcmd:\s*\n((?:[ \t]*-[^\n]*\n?)+)", content, re.MULTILINE)
     if runcmd_match:
