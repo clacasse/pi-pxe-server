@@ -1,6 +1,5 @@
 """Shared helpers for PXE homelab CLI scripts."""
 
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -16,13 +15,11 @@ except ImportError:
 console = Console()
 
 REPO_DIR = Path(__file__).resolve().parent.parent
-CONFIG_DIR = REPO_DIR / "ansible" / "group_vars"
 TEMPLATES_DIR = REPO_DIR / "templates"
 
 
 def generate_password_hash(password: str) -> str:
     """Generate a SHA-512 password hash using the best available method."""
-    # Python crypt module (Linux/macOS)
     try:
         import crypt
 
@@ -30,7 +27,6 @@ def generate_password_hash(password: str) -> str:
     except (ImportError, AttributeError):
         pass
 
-    # openssl
     try:
         result = subprocess.run(
             ["openssl", "passwd", "-6", password],
@@ -42,7 +38,6 @@ def generate_password_hash(password: str) -> str:
     except FileNotFoundError:
         pass
 
-    # mkpasswd
     try:
         result = subprocess.run(
             ["mkpasswd", "--method=SHA-512", password],
@@ -66,18 +61,6 @@ def find_ssh_pubkey() -> str | None:
         if keyfile.exists():
             return keyfile.read_text().strip()
     return None
-
-
-def validate_mac(mac: str) -> str:
-    """Validate and normalize a MAC address to colon-separated lowercase."""
-    mac = mac.strip().lower()
-    if re.match(r"^([0-9a-f]{2}:){5}[0-9a-f]{2}$", mac):
-        return mac
-    if re.match(r"^([0-9a-f]{2}-){5}[0-9a-f]{2}$", mac):
-        return mac.replace("-", ":")
-    if re.match(r"^[0-9a-f]{12}$", mac):
-        return ":".join(mac[i : i + 2] for i in range(0, 12, 2))
-    raise typer.BadParameter(f"Invalid MAC address: {mac} (use format aa:bb:cc:dd:ee:ff)")
 
 
 def resolve_ssh_key(ssh_key: str | None, ssh_key_file: str | None) -> str | None:
@@ -115,11 +98,3 @@ def prompt_password(password: str | None) -> str:
     if password:
         return password
     return typer.prompt("Password", hide_input=True, confirmation_prompt=True)
-
-
-def yaml_list(items: list[str], indent: int = 2) -> str:
-    """Format a list as YAML list items. Returns '[]' for empty lists."""
-    if not items:
-        return " " * indent + "[]" if indent > 0 else "[]"
-    prefix = " " * indent
-    return "\n".join(f"{prefix}- {item}" for item in items)

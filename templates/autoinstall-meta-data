@@ -1,0 +1,2 @@
+instance-id: pxe-install
+local-hostname: ubuntu

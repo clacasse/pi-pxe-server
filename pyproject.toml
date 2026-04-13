@@ -10,4 +10,3 @@ dependencies = [
 
 [project.scripts]
 prepare-sd = "scripts.prepare_sd:app"
-configure = "scripts.configure:app"

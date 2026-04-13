@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Prepare a Raspberry Pi SD card as a PXE server.
 
+Resolves config templates with user inputs and copies the final configs
+to the SD card. Cloud-init runs pi-setup.sh on first boot to finish
+provisioning.
+
 Works on Linux, macOS, and WSL.
 """
 
@@ -9,6 +13,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from string import Template
 
 try:
     import typer
@@ -21,14 +26,16 @@ except ImportError:
 
 from common import (
     REPO_DIR,
+    TEMPLATES_DIR,
     console,
     generate_password_hash,
     prompt_password,
     prompt_ssh_key,
 )
-from configure import write_all_yml, write_inventory_yml, DEFAULT_PACKAGES
 
 app = typer.Typer(help="Prepare a Raspberry Pi SD card as a PXE server.")
+
+DEFAULT_PACKAGES = ["curl", "git", "ansible", "jq"]
 
 
 # ==================== SD Card Helpers ====================
@@ -38,20 +45,17 @@ def detect_boot_partition() -> Path | None:
     """Auto-detect the Raspberry Pi boot partition."""
     candidates = []
 
-    # macOS
     for name in ["bootfs", "boot"]:
         p = Path(f"/Volumes/{name}")
         if p.exists():
             candidates.append(p)
 
-    # Linux
     user = os.environ.get("USER", "")
     for name in ["bootfs", "boot"]:
         p = Path(f"/media/{user}/{name}")
         if p.exists():
             candidates.append(p)
 
-    # WSL - check common drive letters
     for letter in "defgh":
         p = Path(f"/mnt/{letter}")
         if (p / "config.txt").exists() or (p / "cmdline.txt").exists():
@@ -70,7 +74,7 @@ def is_boot_partition(path: Path) -> bool:
 
 
 def _copy_tree_fat32(src: Path, dst: Path) -> None:
-    """Recursively copy a directory to a FAT32 filesystem without touching metadata."""
+    """Recursively copy a directory to FAT32 without touching metadata."""
     dst.mkdir(exist_ok=True)
     for item in src.iterdir():
         src_item = src / item.name
@@ -81,12 +85,53 @@ def _copy_tree_fat32(src: Path, dst: Path) -> None:
             shutil.copyfile(src_item, dst_item)
 
 
+# ==================== Template Rendering ====================
+
+
+def _yaml_list(items: list[str], indent: int = 4) -> str:
+    """Format a list of strings as YAML list items."""
+    if not items:
+        return " " * indent + "[]"
+    prefix = " " * indent
+    return "\n".join(f"{prefix}- {item}" for item in items)
+
+
+def render_autoinstall(
+    target_username: str,
+    password_hash: str,
+    ssh_keys: list[str],
+    packages: list[str],
+    late_commands: list[str],
+) -> str:
+    """Render the autoinstall user-data template with user inputs."""
+    template_path = TEMPLATES_DIR / "autoinstall-user-data.tpl"
+    template = Template(template_path.read_text())
+
+    if late_commands:
+        # Leading blank-line to separate from the previous section
+        late_block = "  late-commands:\n" + _yaml_list(late_commands, indent=4) + "\n"
+    else:
+        late_block = ""
+
+    rendered = template.substitute(
+        target_username=target_username,
+        target_password_hash=password_hash,
+        target_ssh_keys=_yaml_list(ssh_keys, indent=6),
+        target_packages=_yaml_list(packages, indent=4),
+        target_late_commands_block=late_block,
+    )
+    # Collapse any accidental blank lines
+    rendered = re.sub(r"\n\n+", "\n", rendered)
+    return rendered
+
+
+# ==================== Cloud-Init Injection ====================
+
+
 def _detect_pi_user(user_data_content: str) -> str:
     """Extract the first username from cloud-init user-data's users: section."""
-    # Match: users:\n- name: foo
     match = re.search(r"^users:\s*$", user_data_content, re.MULTILINE)
     if match:
-        # Look for first `name:` after the users: line
         after = user_data_content[match.end():]
         name_match = re.search(r"-\s*name:\s*(\S+)", after)
         if name_match:
@@ -95,26 +140,41 @@ def _detect_pi_user(user_data_content: str) -> str:
 
 
 def _inject_cloud_init(user_data: Path) -> None:
-    """Inject packages and runcmd into cloud-init user-data to install ansible
-    and run our playbook on first boot.
-    """
+    """Inject packages and runcmd into cloud-init user-data."""
     content = user_data.read_text()
-    if "pxe-homelab" in content:
+    if "pxe-homelab" in content and "pi-setup.sh" in content:
         console.print("[dim]PXE setup already present in user-data.[/dim]")
         return
 
     pi_user = _detect_pi_user(content)
 
-    # Build runcmd entries - install ansible inline to avoid timing issues with packages:
+    # Ensure required packages are installed
+    required_packages = ["dnsmasq", "nginx", "wget"]
+    if re.search(r"^packages:\s*$", content, re.MULTILINE):
+        additions = "\n".join(f"- {p}" for p in required_packages)
+        content = re.sub(
+            r"^(packages:\s*$)",
+            lambda m: f"{m.group(1)}\n{additions}",
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+    else:
+        content = content.rstrip() + "\npackages:\n" + "\n".join(f"- {p}" for p in required_packages) + "\n"
+
+    # Add runcmd entries. Match existing list indentation if present.
+    indent = "  "  # default if no runcmd exists
+    runcmd_match = re.search(r"^runcmd:\s*\n((?:[ \t]*-[^\n]*\n?)+)", content, re.MULTILINE)
+    if runcmd_match:
+        first_item = runcmd_match.group(1).splitlines()[0]
+        indent = re.match(r"(\s*)-", first_item).group(1)
+
     runcmd_lines = [
-        '  - [ sh, -c, "apt-get update && apt-get install -y ansible" ]',
-        f'  - [ sh, -c, "cp -r /boot/firmware/pxe-homelab /home/{pi_user}/ 2>/dev/null || cp -r /boot/pxe-homelab /home/{pi_user}/" ]',
-        f'  - [ chown, -R, "{pi_user}:{pi_user}", "/home/{pi_user}/pxe-homelab" ]',
-        f'  - [ sh, -c, "cd /home/{pi_user}/pxe-homelab && ansible-playbook -i localhost, -c local ansible/setup-pxe-server.yml > /var/log/pxe-setup.log 2>&1" ]',
+        f'{indent}- [ sh, -c, "chmod +x /boot/firmware/pxe-homelab/scripts/pi-setup.sh 2>/dev/null || chmod +x /boot/pxe-homelab/scripts/pi-setup.sh" ]',
+        f'{indent}- [ sh, -c, "/boot/firmware/pxe-homelab/scripts/pi-setup.sh 2>/dev/null || /boot/pxe-homelab/scripts/pi-setup.sh" ]',
     ]
 
-    # Append to runcmd (create section if missing)
-    if re.search(r"^runcmd:\s*$", content, re.MULTILINE):
+    if runcmd_match:
         content = content.rstrip() + "\n" + "\n".join(runcmd_lines) + "\n"
     else:
         content = content.rstrip() + "\nruncmd:\n" + "\n".join(runcmd_lines) + "\n"
@@ -123,35 +183,57 @@ def _inject_cloud_init(user_data: Path) -> None:
     console.print(f"[dim]Injected PXE setup into cloud-init user-data (user: {pi_user}).[/dim]")
 
 
-def copy_to_sd(boot_mount: Path) -> None:
-    """Copy repo files to the SD card and configure cloud-init to run the playbook on boot."""
+# ==================== SD Card Layout ====================
+
+
+def write_sd_card(
+    boot_mount: Path,
+    target_username: str,
+    password_hash: str,
+    ssh_keys: list[str],
+    packages: list[str],
+    late_commands: list[str],
+) -> None:
+    """Write all required files to the SD card boot partition."""
     sd_repo = boot_mount / "pxe-homelab"
 
-    # Clean previous copy if exists
     if sd_repo.exists():
         shutil.rmtree(sd_repo)
 
-    # Copy repo contents (excluding .git and large files)
     sd_repo.mkdir()
-    for item in ["ansible", "scripts", "templates"]:
-        src = REPO_DIR / item
-        if src.exists():
-            _copy_tree_fat32(src, sd_repo / item)
-    for item in ["README.md", ".gitignore", "pyproject.toml", "requirements.txt"]:
-        src = REPO_DIR / item
-        if src.exists():
-            shutil.copyfile(src, sd_repo / item)
+    (sd_repo / "templates").mkdir()
+    (sd_repo / "scripts").mkdir()
+    (sd_repo / "autoinstall").mkdir()
 
-    # Inject cloud-init instructions
+    # Copy template files that pi-setup.sh will reference
+    for name in ["dnsmasq.conf.tpl", "grub.cfg.tpl", "nginx-pxe.conf"]:
+        shutil.copyfile(TEMPLATES_DIR / name, sd_repo / "templates" / name)
+
+    # Copy pi-setup.sh
+    shutil.copyfile(REPO_DIR / "scripts" / "pi-setup.sh", sd_repo / "scripts" / "pi-setup.sh")
+
+    # Render and write autoinstall user-data
+    user_data_content = render_autoinstall(
+        target_username=target_username,
+        password_hash=password_hash,
+        ssh_keys=ssh_keys,
+        packages=packages,
+        late_commands=late_commands,
+    )
+    (sd_repo / "autoinstall" / "user-data").write_text(user_data_content)
+
+    # Static autoinstall files
+    shutil.copyfile(TEMPLATES_DIR / "autoinstall-meta-data", sd_repo / "autoinstall" / "meta-data")
+    (sd_repo / "autoinstall" / "vendor-data").touch()
+
+    # Inject into Pi Imager's cloud-init user-data
     user_data = boot_mount / "user-data"
     if user_data.exists():
         _inject_cloud_init(user_data)
     else:
         console.print(
             "[yellow]WARNING:[/yellow] No user-data found on boot partition.\n"
-            "Did you configure the Pi in the Imager? The Pi won't auto-provision.\n"
-            "After booting, SSH in and manually run:\n"
-            "  cd ~/pxe-homelab && ansible-playbook -i localhost, -c local ansible/setup-pxe-server.yml"
+            "Did you configure the Pi in the Imager? Setup will not auto-run."
         )
 
 
@@ -196,10 +278,9 @@ def prepare(
 
     if not is_boot_partition(boot_mount):
         console.print(f"[red]ERROR:[/red] {boot_mount} doesn't look like a Raspberry Pi boot partition")
-        console.print("       (no config.txt or cmdline.txt found)")
         raise typer.Exit(1)
 
-    # ---- Gather config inputs ----
+    # ---- Gather inputs ----
     console.print("\n[bold]PXE Server (Raspberry Pi)[/bold]")
 
     if not pi_hostname:
@@ -215,30 +296,22 @@ def prepare(
         username = typer.prompt("Username")
 
     resolved_password = prompt_password(password)
-
     ssh_key_resolved = prompt_ssh_key(ssh_key, ssh_key_file, non_interactive)
 
     # ---- Generate password hash ----
     console.print("\nGenerating password hash...")
     password_hash = generate_password_hash(resolved_password)
 
-    # ---- Write config files ----
-    console.print("Creating configuration...")
-    all_yml_path = write_all_yml(
+    # ---- Write to SD card ----
+    console.print("Writing to SD card...")
+    write_sd_card(
+        boot_mount=boot_mount,
         target_username=username,
         password_hash=password_hash,
         ssh_keys=[ssh_key_resolved],
         packages=DEFAULT_PACKAGES,
         late_commands=[],
     )
-    console.print(f"  Config: [dim]{all_yml_path}[/dim]")
-
-    inventory_path = write_inventory_yml(pi_hostname=pi_hostname, pi_user=pi_user)
-    console.print(f"  Inventory: [dim]{inventory_path}[/dim]")
-
-    # ---- Copy to SD card ----
-    console.print("Copying files to SD card...")
-    copy_to_sd(boot_mount)
 
     # ---- Summary ----
     table = Table(title="Configuration Summary", show_header=False)
@@ -257,9 +330,8 @@ def prepare(
         "Next steps:\n"
         "  1. Eject the SD card\n"
         "  2. Insert into Pi and power on (connect ethernet first)\n"
-        "  3. Wait for setup to complete (~30 min, mostly ISO download)\n"
+        "  3. Wait for setup (~5-10 min, mostly Ubuntu ISO download)\n"
         f"  4. Monitor: [cyan]ssh {pi_user}@{pi_hostname} 'sudo tail -f /var/log/pxe-setup.log'[/cyan]\n"
-        f"     Or watch cloud-init: [cyan]sudo journalctl -u cloud-final -f[/cyan]\n"
         "  5. PXE boot any machine on the network",
         title="Done",
     ))
