@@ -67,7 +67,7 @@ Works on **Linux**, **macOS**, and **WSL**.
 1. Eject the SD card, insert into Pi
 2. Connect ethernet, power on
 3. The Pi will automatically install dependencies and configure PXE services
-4. Monitor: `ssh <pi-user>@<pi-hostname> 'journalctl -u pxe-firstboot -f'`
+4. Monitor: `ssh <pi-user>@<pi-hostname> 'sudo tail -f /var/log/pxe-setup.log'`
 
 ### Step 4: PXE Boot the Target Machine
 
@@ -120,9 +120,7 @@ pxe-homelab/
     ├── prepare_sd.py              # SD card setup (typer CLI)
     ├── configure.py               # Config generator/editor (typer CLI)
     ├── common.py                  # Shared helpers
-    ├── firstboot.sh               # Runs on Pi's first boot
-    ├── bootstrap.sh               # Manual alternative to firstboot
-    └── pxe-firstboot.service      # systemd unit for firstboot
+    └── bootstrap.sh               # Manual alternative if cloud-init isn't available
 ```
 
 ## Reconfigure
@@ -156,4 +154,5 @@ For per-deployment settings, use `configure.py` or edit `ansible/group_vars/all.
 Check the logs:
 - dnsmasq logs: `sudo journalctl -u dnsmasq -f`
 - nginx logs: `sudo journalctl -u nginx -f`
-- firstboot logs: `sudo journalctl -u pxe-firstboot -f`
+- First boot setup: `sudo tail -f /var/log/pxe-setup.log`
+- Cloud-init logs: `sudo journalctl -u cloud-final -f`

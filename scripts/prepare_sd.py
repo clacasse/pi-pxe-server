@@ -5,6 +5,7 @@ Works on Linux, macOS, and WSL.
 """
 
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -80,8 +81,62 @@ def _copy_tree_fat32(src: Path, dst: Path) -> None:
             shutil.copyfile(src_item, dst_item)
 
 
+def _detect_pi_user(user_data_content: str) -> str:
+    """Extract the first username from cloud-init user-data's users: section."""
+    # Match: users:\n- name: foo
+    match = re.search(r"^users:\s*$", user_data_content, re.MULTILINE)
+    if match:
+        # Look for first `name:` after the users: line
+        after = user_data_content[match.end():]
+        name_match = re.search(r"-\s*name:\s*(\S+)", after)
+        if name_match:
+            return name_match.group(1)
+    return "pi"
+
+
+def _inject_cloud_init(user_data: Path) -> None:
+    """Inject packages and runcmd into cloud-init user-data to install ansible
+    and run our playbook on first boot.
+    """
+    content = user_data.read_text()
+    if "pxe-homelab" in content:
+        console.print("[dim]PXE setup already present in user-data.[/dim]")
+        return
+
+    pi_user = _detect_pi_user(content)
+
+    # Append ansible to packages (create section if missing)
+    if re.search(r"^packages:\s*$", content, re.MULTILINE):
+        # Packages list exists - insert ansible right after the packages: line
+        content = re.sub(
+            r"^(packages:\s*$)",
+            r"\1\n- ansible",
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+    else:
+        content = content.rstrip() + "\npackages:\n- ansible\n"
+
+    # Build runcmd entries
+    runcmd_lines = [
+        f'  - [ sh, -c, "cp -r /boot/firmware/pxe-homelab /home/{pi_user}/ 2>/dev/null || cp -r /boot/pxe-homelab /home/{pi_user}/" ]',
+        f'  - [ chown, -R, "{pi_user}:{pi_user}", "/home/{pi_user}/pxe-homelab" ]',
+        f'  - [ sh, -c, "cd /home/{pi_user}/pxe-homelab && ansible-playbook -i localhost, -c local ansible/setup-pxe-server.yml > /var/log/pxe-setup.log 2>&1" ]',
+    ]
+
+    # Append to runcmd (create section if missing)
+    if re.search(r"^runcmd:\s*$", content, re.MULTILINE):
+        content = content.rstrip() + "\n" + "\n".join(runcmd_lines) + "\n"
+    else:
+        content = content.rstrip() + "\nruncmd:\n" + "\n".join(runcmd_lines) + "\n"
+
+    user_data.write_text(content)
+    console.print(f"[dim]Injected PXE setup into cloud-init user-data (user: {pi_user}).[/dim]")
+
+
 def copy_to_sd(boot_mount: Path) -> None:
-    """Copy repo files and firstboot service to the SD card."""
+    """Copy repo files to the SD card and configure cloud-init to run the playbook on boot."""
     sd_repo = boot_mount / "pxe-homelab"
 
     # Clean previous copy if exists
@@ -94,61 +149,21 @@ def copy_to_sd(boot_mount: Path) -> None:
         src = REPO_DIR / item
         if src.exists():
             _copy_tree_fat32(src, sd_repo / item)
-    for item in ["README.md", ".gitignore", "pyproject.toml"]:
+    for item in ["README.md", ".gitignore", "pyproject.toml", "requirements.txt"]:
         src = REPO_DIR / item
         if src.exists():
             shutil.copyfile(src, sd_repo / item)
 
-    # Copy firstboot script and service to boot root
-    firstboot_sh = REPO_DIR / "scripts" / "firstboot.sh"
-    firstboot_svc = REPO_DIR / "scripts" / "pxe-firstboot.service"
-    shutil.copyfile(firstboot_sh, boot_mount / "pxe-firstboot.sh")
-    shutil.copyfile(firstboot_svc, boot_mount / "pxe-firstboot.service")
-
-    # Hook into Pi Imager's cloud-init user-data (newer Imager)
-    # or firstrun.sh (older Imager)
+    # Inject cloud-init instructions
     user_data = boot_mount / "user-data"
-    firstrun = boot_mount / "firstrun.sh"
-
-    pxe_setup_cmds = [
-        '  - [ sh, -c, "cp /boot/firmware/pxe-firstboot.service /etc/systemd/system/ 2>/dev/null || cp /boot/pxe-firstboot.service /etc/systemd/system/" ]',
-        "  - [ systemctl, enable, pxe-firstboot.service ]",
-    ]
-
     if user_data.exists():
-        content = user_data.read_text()
-        if "pxe-firstboot" in content:
-            console.print("[dim]PXE firstboot already configured in user-data.[/dim]")
-        elif "runcmd:" in content:
-            # Append to existing runcmd section
-            content = content.rstrip() + "\n" + "\n".join(pxe_setup_cmds) + "\n"
-            user_data.write_text(content)
-            console.print("[dim]Added PXE setup commands to cloud-init user-data.[/dim]")
-        else:
-            # Add a runcmd section
-            content = content.rstrip() + "\nruncmd:\n" + "\n".join(pxe_setup_cmds) + "\n"
-            user_data.write_text(content)
-            console.print("[dim]Added runcmd section to cloud-init user-data.[/dim]")
-    elif firstrun.exists():
-        content = firstrun.read_text()
-        content = content.replace("exit 0\n", "").rstrip()
-        content += """
-
-# Enable PXE firstboot service
-cp /boot/firmware/pxe-firstboot.service /etc/systemd/system/pxe-firstboot.service 2>/dev/null || \\
-cp /boot/pxe-firstboot.service /etc/systemd/system/pxe-firstboot.service 2>/dev/null
-systemctl enable pxe-firstboot.service
-
-exit 0
-"""
-        firstrun.write_text(content)
-        console.print("[dim]Added PXE setup to firstrun.sh.[/dim]")
+        _inject_cloud_init(user_data)
     else:
         console.print(
-            "[yellow]WARNING:[/yellow] No user-data or firstrun.sh found (did you configure the Pi in the Imager?).\n"
-            "After booting, manually run:\n"
-            "  sudo cp /boot/firmware/pxe-firstboot.service /etc/systemd/system/\n"
-            "  sudo systemctl enable --now pxe-firstboot.service"
+            "[yellow]WARNING:[/yellow] No user-data found on boot partition.\n"
+            "Did you configure the Pi in the Imager? The Pi won't auto-provision.\n"
+            "After booting, SSH in and manually run:\n"
+            "  cd ~/pxe-homelab && ansible-playbook -i localhost, -c local ansible/setup-pxe-server.yml"
         )
 
 
@@ -255,7 +270,8 @@ def prepare(
         "  1. Eject the SD card\n"
         "  2. Insert into Pi and power on (connect ethernet first)\n"
         "  3. Wait for setup to complete (~30 min, mostly ISO download)\n"
-        f"  4. Monitor: [cyan]ssh {pi_user}@{pi_hostname} 'journalctl -u pxe-firstboot -f'[/cyan]\n"
+        f"  4. Monitor: [cyan]ssh {pi_user}@{pi_hostname} 'sudo tail -f /var/log/pxe-setup.log'[/cyan]\n"
+        f"     Or watch cloud-init: [cyan]sudo journalctl -u cloud-final -f[/cyan]\n"
         "  5. PXE boot any machine on the network",
         title="Done",
     ))
