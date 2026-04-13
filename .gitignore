@@ -12,3 +12,4 @@ tftp/grub/x86_64-efi/
 # OS
 .DS_Store
 Thumbs.db
+__pycache__/
