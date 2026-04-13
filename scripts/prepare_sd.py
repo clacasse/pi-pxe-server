@@ -81,17 +81,17 @@ def copy_to_sd(boot_mount: Path) -> None:
     for item in ["ansible", "scripts", "templates"]:
         src = REPO_DIR / item
         if src.exists():
-            shutil.copytree(src, sd_repo / item, copy_function=shutil.copy)
+            shutil.copytree(src, sd_repo / item, copy_function=shutil.copyfile)
     for item in ["README.md", ".gitignore", "pyproject.toml"]:
         src = REPO_DIR / item
         if src.exists():
-            shutil.copy(src, sd_repo / item)
+            shutil.copyfile(src, sd_repo / item)
 
     # Copy firstboot script and service to boot root
     firstboot_sh = REPO_DIR / "scripts" / "firstboot.sh"
     firstboot_svc = REPO_DIR / "scripts" / "pxe-firstboot.service"
-    shutil.copy(firstboot_sh, boot_mount / "pxe-firstboot.sh")
-    shutil.copy(firstboot_svc, boot_mount / "pxe-firstboot.service")
+    shutil.copyfile(firstboot_sh, boot_mount / "pxe-firstboot.sh")
+    shutil.copyfile(firstboot_svc, boot_mount / "pxe-firstboot.service")
 
     # Hook into Pi Imager's firstrun.sh
     firstrun = boot_mount / "firstrun.sh"
