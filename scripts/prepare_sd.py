@@ -105,9 +105,31 @@ def copy_to_sd(boot_mount: Path) -> None:
     shutil.copyfile(firstboot_sh, boot_mount / "pxe-firstboot.sh")
     shutil.copyfile(firstboot_svc, boot_mount / "pxe-firstboot.service")
 
-    # Hook into Pi Imager's firstrun.sh
+    # Hook into Pi Imager's cloud-init user-data (newer Imager)
+    # or firstrun.sh (older Imager)
+    user_data = boot_mount / "user-data"
     firstrun = boot_mount / "firstrun.sh"
-    if firstrun.exists():
+
+    pxe_setup_cmds = [
+        '  - [ sh, -c, "cp /boot/firmware/pxe-firstboot.service /etc/systemd/system/ 2>/dev/null || cp /boot/pxe-firstboot.service /etc/systemd/system/" ]',
+        "  - [ systemctl, enable, pxe-firstboot.service ]",
+    ]
+
+    if user_data.exists():
+        content = user_data.read_text()
+        if "pxe-firstboot" in content:
+            console.print("[dim]PXE firstboot already configured in user-data.[/dim]")
+        elif "runcmd:" in content:
+            # Append to existing runcmd section
+            content = content.rstrip() + "\n" + "\n".join(pxe_setup_cmds) + "\n"
+            user_data.write_text(content)
+            console.print("[dim]Added PXE setup commands to cloud-init user-data.[/dim]")
+        else:
+            # Add a runcmd section
+            content = content.rstrip() + "\nruncmd:\n" + "\n".join(pxe_setup_cmds) + "\n"
+            user_data.write_text(content)
+            console.print("[dim]Added runcmd section to cloud-init user-data.[/dim]")
+    elif firstrun.exists():
         content = firstrun.read_text()
         content = content.replace("exit 0\n", "").rstrip()
         content += """
@@ -120,9 +142,10 @@ systemctl enable pxe-firstboot.service
 exit 0
 """
         firstrun.write_text(content)
+        console.print("[dim]Added PXE setup to firstrun.sh.[/dim]")
     else:
         console.print(
-            "[yellow]WARNING:[/yellow] No firstrun.sh found (did you configure the Pi in the Imager?).\n"
+            "[yellow]WARNING:[/yellow] No user-data or firstrun.sh found (did you configure the Pi in the Imager?).\n"
             "After booting, manually run:\n"
             "  sudo cp /boot/firmware/pxe-firstboot.service /etc/systemd/system/\n"
             "  sudo systemctl enable --now pxe-firstboot.service"
