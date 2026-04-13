@@ -25,8 +25,9 @@ echo "Waiting for network..."
 until ping -c1 -W2 archive.ubuntu.com &>/dev/null; do sleep 2; done
 
 echo "Installing packages..."
+export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y dnsmasq nginx wget
+apt-get install -y -o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-confdef dnsmasq nginx wget
 
 # ---- Directory structure ----
 mkdir -p /srv/http/autoinstall
