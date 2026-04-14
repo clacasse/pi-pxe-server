@@ -157,9 +157,16 @@ def _inject_cloud_init(user_data: Path) -> None:
         first_item = runcmd_match.group(1).splitlines()[0]
         indent = re.match(r"(\s*)-", first_item).group(1)
 
+    # Find pi-setup.sh in whichever boot dir the Pi OS uses, then exec it.
+    # Using 'for' picks the correct path by existence check rather than by
+    # fall-through on failure (which would mask real errors).
+    find_script = (
+        'for p in /boot/firmware/pxe-homelab/scripts/pi-setup.sh '
+        '/boot/pxe-homelab/scripts/pi-setup.sh; '
+        'do [ -f $p ] && { chmod +x $p; exec $p; }; done'
+    )
     runcmd_lines = [
-        f'{indent}- [ sh, -c, "chmod +x /boot/firmware/pxe-homelab/scripts/pi-setup.sh 2>/dev/null || chmod +x /boot/pxe-homelab/scripts/pi-setup.sh" ]',
-        f'{indent}- [ sh, -c, "/boot/firmware/pxe-homelab/scripts/pi-setup.sh 2>/dev/null || /boot/pxe-homelab/scripts/pi-setup.sh" ]',
+        f'{indent}- [ sh, -c, "{find_script}" ]',
     ]
 
     if runcmd_match:

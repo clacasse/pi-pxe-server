@@ -24,6 +24,17 @@ echo "Network: $NETWORK"
 echo "Waiting for network..."
 until ping -c1 -W2 archive.ubuntu.com &>/dev/null; do sleep 2; done
 
+# Pi has no RTC - wait for NTP sync so apt signatures validate
+echo "Waiting for time sync (Pi has no RTC)..."
+systemctl start systemd-timesyncd 2>/dev/null || true
+for i in $(seq 1 60); do
+    if timedatectl show --property=NTPSynchronized --value 2>/dev/null | grep -q yes; then
+        echo "Clock synced: $(date)"
+        break
+    fi
+    sleep 2
+done
+
 echo "Installing packages..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
