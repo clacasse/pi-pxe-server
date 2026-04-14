@@ -47,7 +47,8 @@ mkdir -p /srv/tftp/boot/grub
 
 # ---- Template configs with IP/network ----
 echo "Writing configs..."
-sed "s|__NETWORK__|${NETWORK}|g" "$BOOT_REPO/templates/dnsmasq.conf.tpl" > /etc/dnsmasq.conf
+# Raspberry Pi OS systemd unit only reads /etc/dnsmasq.d/, not /etc/dnsmasq.conf
+sed "s|__NETWORK__|${NETWORK}|g" "$BOOT_REPO/templates/dnsmasq.conf.tpl" > /etc/dnsmasq.d/pxe.conf
 sed "s|__PI_IP__|${PI_IP}|g" "$BOOT_REPO/templates/grub.cfg.tpl" > /srv/tftp/grub/grub.cfg
 cp /srv/tftp/grub/grub.cfg /srv/tftp/boot/grub/grub.cfg
 
