@@ -10,7 +10,9 @@ autoinstall:
       name: lvm
       sizing-policy: all
   identity:
+    realname: $target_username
     username: $target_username
+    hostname: ubuntu
     password: "$target_password_hash"
   ssh:
     install-server: true
