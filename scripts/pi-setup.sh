@@ -63,7 +63,7 @@ cp "$BOOT_REPO/autoinstall/meta-data" /srv/http/autoinstall/meta-data
 touch /srv/http/autoinstall/vendor-data
 
 # ---- Download Ubuntu ISO ----
-UBUNTU_VERSION="${UBUNTU_VERSION:-24.04.2}"
+UBUNTU_VERSION="${UBUNTU_VERSION:-25.10}"
 ISO_URL="https://releases.ubuntu.com/${UBUNTU_VERSION}/ubuntu-${UBUNTU_VERSION}-live-server-amd64.iso"
 echo "Downloading Ubuntu ISO (${UBUNTU_VERSION})..."
 wget -q --show-progress -O /srv/http/ubuntu.iso "$ISO_URL"
