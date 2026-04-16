@@ -26,14 +26,7 @@ No Ansible, no Docker — just cloud-init and a shell script. The Pi is single-p
 The PXE server auto-detects x86 vs. Pi clients and serves the right files. Pi clients use native TFTP boot (no UEFI firmware needed), but need network boot enabled:
 
 **Raspberry Pi 3 / 3B+:**
-Enable OTP network boot (one-time, irreversible):
-```bash
-# On a running Pi 3 with Pi OS:
-echo program_usb_boot_mode=1 | sudo tee -a /boot/config.txt
-sudo reboot
-# After reboot, remove the SD card — it will network boot.
-```
-Or: put just `bootcode.bin` on an SD card (download from [raspberrypi/firmware](https://github.com/raspberrypi/firmware/blob/master/boot/bootcode.bin)).
+Put `bootcode.bin` on a FAT32-formatted SD card — the Pi 3 loads this from SD, then switches to TFTP for everything else. Download it from [raspberrypi/firmware](https://github.com/raspberrypi/firmware/blob/master/boot/bootcode.bin).
 
 **Raspberry Pi 4:**
 Set EEPROM to try network boot first:
