@@ -9,7 +9,7 @@ exec > >(tee -a "$LOG") 2>&1
 echo "=== PXE Setup $(date) ==="
 
 # ---- Locate the repo on the boot partition ----
-for BOOT_REPO in /boot/firmware/pxe-homelab /boot/pxe-homelab; do
+for BOOT_REPO in /boot/firmware/pi-pxe-server /boot/pi-pxe-server; do
     [ -d "$BOOT_REPO" ] && break
 done
 echo "Repo: $BOOT_REPO"

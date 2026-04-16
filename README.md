@@ -1,4 +1,4 @@
-# PXE Homelab
+# Pi PXE Server
 
 Automated bare metal provisioning for Ubuntu servers via PXE boot from a Raspberry Pi.
 
@@ -7,7 +7,7 @@ Automated bare metal provisioning for Ubuntu servers via PXE boot from a Raspber
 From a fresh Raspberry Pi and a bare metal PC, this repo:
 
 1. Turns a **Raspberry Pi** into a PXE server (dnsmasq + nginx)
-2. PXE boots target machines with a fully **unattended Ubuntu 24.04 LTS** install
+2. PXE boots target machines with a fully **unattended Ubuntu 25.10** install
 3. Leaves you with clean Ubuntu servers ready for further provisioning
 
 No Ansible, no Docker — just cloud-init and a shell script. The Pi is single-purpose and meant to be "flash once, forget about it." To reconfigure, reflash.
@@ -35,8 +35,8 @@ Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/):
 ### Step 2: Prepare the SD Card
 
 ```bash
-git clone git@github.com:clacasse/pxe-homelab.git
-cd pxe-homelab
+git clone git@github.com:clacasse/pi-pxe-server.git
+cd pi-pxe-server
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -92,7 +92,7 @@ Monitor progress: `ssh <pi-user>@<pi-hostname> 'sudo tail -f /var/log/pxe-setup.
                       │
 ┌─────────────────────┴────────────────────────┐
 │  Target Machine                               │
-│  PXE boot -> Ubuntu 24.04 autoinstall        │
+│  PXE boot -> Ubuntu 25.10 autoinstall        │
 └──────────────────────────────────────────────┘
 ```
 
@@ -113,7 +113,7 @@ The Pi is designed as a throwaway / single-purpose device. To change settings:
 ## File Structure
 
 ```
-pxe-homelab/
+pi-pxe-server/
 ├── README.md
 ├── pyproject.toml
 ├── requirements.txt

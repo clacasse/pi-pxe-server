@@ -1,4 +1,4 @@
-"""Shared helpers for PXE homelab CLI scripts."""
+"""Shared helpers for Pi PXE server CLI scripts."""
 
 import subprocess
 import sys

@@ -142,7 +142,7 @@ def _detect_pi_user(user_data_content: str) -> str:
 def _inject_cloud_init(user_data: Path) -> None:
     """Inject packages and runcmd into cloud-init user-data."""
     content = user_data.read_text()
-    if "pxe-homelab" in content and "pi-setup.sh" in content:
+    if "pi-pxe-server" in content and "pi-setup.sh" in content:
         console.print("[dim]PXE setup already present in user-data.[/dim]")
         return
 
@@ -161,8 +161,8 @@ def _inject_cloud_init(user_data: Path) -> None:
     # Using 'for' picks the correct path by existence check rather than by
     # fall-through on failure (which would mask real errors).
     find_script = (
-        'for p in /boot/firmware/pxe-homelab/scripts/pi-setup.sh '
-        '/boot/pxe-homelab/scripts/pi-setup.sh; '
+        'for p in /boot/firmware/pi-pxe-server/scripts/pi-setup.sh '
+        '/boot/pi-pxe-server/scripts/pi-setup.sh; '
         'do [ -f $p ] && { chmod +x $p; exec $p; }; done'
     )
     runcmd_lines = [
@@ -190,7 +190,7 @@ def write_sd_card(
     late_commands: list[str],
 ) -> None:
     """Write all required files to the SD card boot partition."""
-    sd_repo = boot_mount / "pxe-homelab"
+    sd_repo = boot_mount / "pi-pxe-server"
 
     if sd_repo.exists():
         shutil.rmtree(sd_repo)
@@ -248,7 +248,7 @@ def prepare(
 ):
     """Prepare a Raspberry Pi SD card as a PXE server."""
 
-    console.print(Panel("PXE Homelab - SD Card Preparation", style="bold blue"))
+    console.print(Panel("Pi PXE Server - SD Card Preparation", style="bold blue"))
 
     # ---- Boot partition ----
     if boot_path:

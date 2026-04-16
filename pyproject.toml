@@ -1,5 +1,5 @@
 [project]
-name = "pxe-homelab"
+name = "pi-pxe-server"
 version = "0.1.0"
 description = "Automated PXE server setup for bare metal Ubuntu provisioning"
 requires-python = ">=3.10"
