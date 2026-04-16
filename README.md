@@ -1,26 +1,25 @@
 # Pi PXE Server
 
-Automated bare metal provisioning for Ubuntu servers via PXE boot from a Raspberry Pi.
+Multi-architecture PXE server on a Raspberry Pi. Boots x86_64 PCs and ARM64 devices (including other Pis) into unattended Ubuntu installs.
 
 ## What This Does
 
-From a fresh Raspberry Pi and a bare metal PC, this repo:
+From a fresh Raspberry Pi, this repo:
 
-1. Turns a **Raspberry Pi** into a PXE server (dnsmasq + nginx)
-2. PXE boots target machines with a fully **unattended Ubuntu 25.10** install
+1. Turns a **Raspberry Pi** into a multi-arch PXE server (dnsmasq + nginx)
+2. PXE boots **x86_64** and **ARM64** machines with fully **unattended Ubuntu 25.10** installs
 3. Leaves you with clean Ubuntu servers ready for further provisioning
 
 No Ansible, no Docker — just cloud-init and a shell script. The Pi is single-purpose and meant to be "flash once, forget about it." To reconfigure, reflash.
 
 ## Prerequisites
 
-- Raspberry Pi (4 recommended, 3B+ works)
-- Target machine connected via ethernet to the same network
+- Raspberry Pi (4 recommended, 3B+ works) as the PXE server
+- Target machine(s) connected via ethernet to the same network
 - Existing DHCP server on the network (router, UniFi, etc.)
 - Python 3.10+ on your workstation (for `prepare_sd.py`)
-- On the target machine:
-  - Secure Boot disabled
-  - PXE/Network boot set as first boot option in BIOS
+- **x86_64 targets:** Secure Boot disabled, PXE/Network boot set as first boot option in BIOS
+- **ARM64 targets (Pi 4/5):** [Pi UEFI firmware](https://github.com/pftf/RPi4) flashed to SD card, or EEPROM network boot enabled (`BOOT_ORDER=0xf21`)
 
 ## Quick Start
 
@@ -84,16 +83,19 @@ Monitor progress: `ssh <pi-user>@<pi-hostname> 'sudo tail -f /var/log/pxe-setup.
 ```
 ┌──────────────────────────────────────────────┐
 │  Raspberry Pi (PXE Server)                   │
-│  dnsmasq (proxyDHCP + TFTP)                 │
+│  dnsmasq (proxyDHCP + TFTP, multi-arch)     │
 │  nginx (HTTP on port 8080)                   │
 └─────────────────────┬────────────────────────┘
                       │
         Network (existing DHCP from router)
                       │
-┌─────────────────────┴────────────────────────┐
-│  Target Machine                               │
-│  PXE boot -> Ubuntu 25.10 autoinstall        │
-└──────────────────────────────────────────────┘
+        ┌─────────────┴─────────────���
+        │                           │
+┌───────┴──────────┐  ┌────────────┴───────────┐
+│  x86_64 PC       │  │  ARM64 device (Pi 4/5) │
+│  UEFI PXE boot   │  │  UEFI PXE boot         │
+│  → Ubuntu 25.10  │  │  → Ubuntu 25.10        │
+└──────────────────┘  └────────────────────────┘
 ```
 
 The PXE server serves any machine that network boots. Control it by starting/stopping dnsmasq:
@@ -119,11 +121,12 @@ pi-pxe-server/
 ├── requirements.txt
 ├── scripts/
 │   ├── prepare_sd.py              # SD card setup (typer CLI)
-│   ├── pi-setup.sh                # Runs once on Pi first boot
+│   ├── pi-setup.sh                # Runs once on Pi first boot (multi-arch)
 │   └── common.py                  # Shared helpers
 └── templates/
-    ├── dnsmasq.conf.tpl           # __NETWORK__ placeholder
-    ├── grub.cfg.tpl               # __PI_IP__ placeholder
+    ├── dnsmasq.conf.tpl           # Multi-arch proxyDHCP + TFTP
+    ├── grub-x86_64.cfg.tpl        # x86_64 GRUB boot config
+    ├── grub-arm64.cfg.tpl         # ARM64 GRUB boot config
     ├── nginx-pxe.conf             # static
     ├── autoinstall-user-data.tpl  # target install config
     └── autoinstall-meta-data      # static
