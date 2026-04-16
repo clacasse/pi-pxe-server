@@ -305,7 +305,10 @@ def prepare(
         password_hash=password_hash,
         ssh_keys=[ssh_key_resolved],
         packages=DEFAULT_PACKAGES,
-        late_commands=[],
+        late_commands=[
+            f"echo '{username} ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/{username}",
+            f"chmod 440 /target/etc/sudoers.d/{username}",
+        ],
     )
 
     # ---- Summary ----
