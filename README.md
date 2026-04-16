@@ -19,20 +19,34 @@ No Ansible, no Docker — just cloud-init and a shell script. The Pi is single-p
 - Existing DHCP server on the network (router, UniFi, etc.)
 - Python 3.10+ on your workstation (for `prepare_sd.py`)
 - **x86_64 targets:** Secure Boot disabled, PXE/Network boot set as first boot option in BIOS
-- **ARM64 targets:** must be able to UEFI PXE boot — see below
+- **ARM64 targets (Raspberry Pi):** enable native network boot — see below
 
-### ARM64 PXE boot setup by Pi model
+### Preparing Pi clients for network boot
 
-The PXE server handles ARM64 automatically. The client Pi needs firmware that sends a UEFI PXE request on the network.
+The PXE server auto-detects x86 vs. Pi clients and serves the right files. Pi clients use native TFTP boot (no UEFI firmware needed), but need network boot enabled:
 
 **Raspberry Pi 3 / 3B+:**
-Flash [ipxe/pipxe](https://github.com/ipxe/pipxe/releases) `sdcard.img` to an SD card. Insert it, plug in ethernet, power on — iPXE boots and PXE requests from the server.
+Enable OTP network boot (one-time, irreversible):
+```bash
+# On a running Pi 3 with Pi OS:
+echo program_usb_boot_mode=1 | sudo tee -a /boot/config.txt
+sudo reboot
+# After reboot, remove the SD card — it will network boot.
+```
+Or: put just `bootcode.bin` on an SD card (download from [raspberrypi/firmware](https://github.com/raspberrypi/firmware/blob/master/boot/bootcode.bin)).
 
 **Raspberry Pi 4:**
-Flash [rgl/rpi4-uefi-ipxe](https://github.com/rgl/rpi4-uefi-ipxe) to an SD card. Alternatively, flash [pftf/RPi4](https://github.com/pftf/RPi4) UEFI firmware and set network boot as first boot option in the UEFI settings.
+Set EEPROM to try network boot first:
+```bash
+# On a running Pi 4:
+sudo rpi-eeprom-config --edit
+# Set: BOOT_ORDER=0xf21
+sudo reboot
+# Remove SD card — it will network boot.
+```
 
 **Raspberry Pi 5:**
-No known iPXE or UEFI firmware available yet. Contributions welcome — this is a gap in the ecosystem. For now, install Ubuntu on the Pi 5 manually and manage it with `prep-node` from [k8s-cluster-bootstrap](https://github.com/clacasse/k8s-cluster-bootstrap).
+Same as Pi 4 — update EEPROM `BOOT_ORDER=0xf21`.
 
 ## Quick Start
 
@@ -139,7 +153,8 @@ pi-pxe-server/
 └── templates/
     ├── dnsmasq.conf.tpl           # Multi-arch proxyDHCP + TFTP
     ├── grub-x86_64.cfg.tpl        # x86_64 GRUB boot config
-    ├── grub-arm64.cfg.tpl         # ARM64 GRUB boot config
+    ├── pi-config.txt.tpl          # Pi native boot config.txt
+    ├── pi-cmdline.txt.tpl         # Pi kernel cmdline (autoinstall)
     ├── nginx-pxe.conf             # static
     ├── autoinstall-user-data.tpl  # target install config
     └── autoinstall-meta-data      # static

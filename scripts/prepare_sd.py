@@ -201,7 +201,7 @@ def write_sd_card(
     (sd_repo / "autoinstall").mkdir()
 
     # Copy template files that pi-setup.sh will reference
-    for name in ["dnsmasq.conf.tpl", "grub-x86_64.cfg.tpl", "grub-arm64.cfg.tpl", "nginx-pxe.conf"]:
+    for name in ["dnsmasq.conf.tpl", "grub-x86_64.cfg.tpl", "pi-config.txt.tpl", "pi-cmdline.txt.tpl", "nginx-pxe.conf"]:
         shutil.copyfile(TEMPLATES_DIR / name, sd_repo / "templates" / name)
 
     # Copy pi-setup.sh

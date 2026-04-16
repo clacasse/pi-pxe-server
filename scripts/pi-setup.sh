@@ -1,7 +1,10 @@
 #!/bin/bash
 # Runs once on Pi first boot via cloud-init runcmd.
 # Transforms the pre-rendered configs on the boot partition into
-# a fully configured multi-arch PXE server (x86_64 + ARM64).
+# a fully configured multi-arch PXE server.
+#
+# x86_64: UEFI PXE → GRUB → Ubuntu autoinstall
+# ARM64:  Native Pi TFTP boot → Ubuntu kernel → autoinstall
 set -e
 
 LOG=/var/log/pxe-setup.log
@@ -46,19 +49,19 @@ mkdir -p /srv/http/x86_64
 mkdir -p /srv/http/arm64
 mkdir -p /srv/tftp/x86_64/grub
 mkdir -p /srv/tftp/x86_64/boot/grub
-mkdir -p /srv/tftp/arm64/grub
-mkdir -p /srv/tftp/arm64/boot/grub
+mkdir -p /srv/tftp/arm64
 
 # ---- Template configs with IP/network ----
 echo "Writing configs..."
-# Raspberry Pi OS systemd unit only reads /etc/dnsmasq.d/, not /etc/dnsmasq.conf
 sed "s|__NETWORK__|${NETWORK}|g" "$BOOT_REPO/templates/dnsmasq.conf.tpl" > /etc/dnsmasq.d/pxe.conf
 
-# Per-architecture GRUB configs
+# x86_64 GRUB config
 sed "s|__PI_IP__|${PI_IP}|g" "$BOOT_REPO/templates/grub-x86_64.cfg.tpl" > /srv/tftp/x86_64/grub/grub.cfg
 cp /srv/tftp/x86_64/grub/grub.cfg /srv/tftp/x86_64/boot/grub/grub.cfg
-sed "s|__PI_IP__|${PI_IP}|g" "$BOOT_REPO/templates/grub-arm64.cfg.tpl" > /srv/tftp/arm64/grub/grub.cfg
-cp /srv/tftp/arm64/grub/grub.cfg /srv/tftp/arm64/boot/grub/grub.cfg
+
+# ARM64 Pi native boot config
+sed "s|__PI_IP__|${PI_IP}|g" "$BOOT_REPO/templates/pi-cmdline.txt.tpl" > /srv/tftp/arm64/cmdline.txt
+cp "$BOOT_REPO/templates/pi-config.txt.tpl" /srv/tftp/arm64/config.txt
 
 # Nginx site (static)
 cp "$BOOT_REPO/templates/nginx-pxe.conf" /etc/nginx/sites-available/pxe
@@ -81,7 +84,7 @@ echo "Downloading Ubuntu ARM64 ISO (${UBUNTU_VERSION})..."
 wget -q --show-progress -O /srv/http/arm64/ubuntu.iso \
     "https://cdimage.ubuntu.com/releases/${UBUNTU_VERSION}/release/ubuntu-${UBUNTU_VERSION}-live-server-arm64.iso"
 
-# ---- Extract kernel + initrd from ISOs ----
+# ---- Extract x86_64 kernel + initrd ----
 echo "Extracting x86_64 kernel/initrd..."
 mkdir -p /mnt/iso
 mount -o loop,ro /srv/http/x86_64/ubuntu.iso /mnt/iso
@@ -89,14 +92,14 @@ cp /mnt/iso/casper/vmlinuz /srv/tftp/x86_64/vmlinuz
 cp /mnt/iso/casper/initrd /srv/tftp/x86_64/initrd
 umount /mnt/iso
 
+# ---- Extract ARM64 kernel + initrd ----
 echo "Extracting ARM64 kernel/initrd..."
 mount -o loop,ro /srv/http/arm64/ubuntu.iso /mnt/iso
 cp /mnt/iso/casper/vmlinuz /srv/tftp/arm64/vmlinuz
 cp /mnt/iso/casper/initrd /srv/tftp/arm64/initrd
 umount /mnt/iso
 
-# ---- Download + extract GRUB netboot binaries ----
-# x86_64 GRUB
+# ---- Download x86_64 GRUB ----
 GRUB_X86_SIGNED_DEB="http://archive.ubuntu.com/ubuntu/pool/main/g/grub2-signed/grub-efi-amd64-signed_1.202+2.12-1ubuntu7_amd64.deb"
 GRUB_X86_BIN_DEB="http://archive.ubuntu.com/ubuntu/pool/main/g/grub2-unsigned/grub-efi-amd64-bin_2.12-1ubuntu7_amd64.deb"
 
@@ -111,20 +114,24 @@ cp /tmp/grub-x86-signed/usr/lib/grub/x86_64-efi-signed/grubnetx64.efi.signed /sr
 cp -r /tmp/grub-x86-bin/usr/lib/grub/x86_64-efi /srv/tftp/x86_64/grub/x86_64-efi
 rm -rf /tmp/grub-x86-signed /tmp/grub-x86-bin /tmp/grub-x86-signed.deb /tmp/grub-x86-bin.deb
 
-# ARM64 GRUB
-GRUB_ARM64_SIGNED_DEB="http://ports.ubuntu.com/ubuntu-ports/pool/main/g/grub2-signed/grub-efi-arm64-signed_1.202+2.12-1ubuntu7_arm64.deb"
-GRUB_ARM64_BIN_DEB="http://ports.ubuntu.com/ubuntu-ports/pool/main/g/grub2-unsigned/grub-efi-arm64-bin_2.12-1ubuntu7_arm64.deb"
+# ---- Download Pi boot firmware (for native TFTP boot) ----
+PI_FW_BASE="https://raw.githubusercontent.com/raspberrypi/firmware/master/boot"
 
-echo "Downloading ARM64 GRUB packages..."
-wget -q -O /tmp/grub-arm64-signed.deb "$GRUB_ARM64_SIGNED_DEB"
-wget -q -O /tmp/grub-arm64-bin.deb "$GRUB_ARM64_BIN_DEB"
+echo "Downloading Pi boot firmware..."
+for f in bootcode.bin start.elf start4.elf fixup.dat fixup4.dat \
+         bcm2710-rpi-3-b.dtb bcm2710-rpi-3-b-plus.dtb \
+         bcm2711-rpi-4-b.dtb bcm2712-rpi-5-b.dtb; do
+    echo "  $f"
+    wget -q -O "/srv/tftp/arm64/$f" "$PI_FW_BASE/$f" || echo "  (not found, skipping)"
+done
 
-echo "Extracting ARM64 GRUB..."
-dpkg -x /tmp/grub-arm64-signed.deb /tmp/grub-arm64-signed
-dpkg -x /tmp/grub-arm64-bin.deb /tmp/grub-arm64-bin
-cp /tmp/grub-arm64-signed/usr/lib/grub/arm64-efi-signed/grubnetaa64.efi.signed /srv/tftp/arm64/grubnetaa64.efi
-cp -r /tmp/grub-arm64-bin/usr/lib/grub/arm64-efi /srv/tftp/arm64/grub/arm64-efi
-rm -rf /tmp/grub-arm64-signed /tmp/grub-arm64-bin /tmp/grub-arm64-signed.deb /tmp/grub-arm64-bin.deb
+# Pi native boot: the Pi looks for files by serial number prefix,
+# then falls back to the root. Symlink so Pis that request from
+# the TFTP root find the arm64 files.
+for f in /srv/tftp/arm64/*; do
+    base=$(basename "$f")
+    [ ! -e "/srv/tftp/$base" ] && ln -sf "arm64/$base" "/srv/tftp/$base"
+done
 
 # ---- Enable services ----
 echo "Enabling services..."
@@ -139,11 +146,17 @@ systemctl is-active dnsmasq && echo "dnsmasq: active"
 systemctl is-active nginx && echo "nginx: active"
 curl -sf -o /dev/null "http://localhost:8080/autoinstall/user-data" && echo "HTTP: serving"
 [ -f /srv/tftp/x86_64/grubnetx64.efi ] && echo "x86_64 GRUB: ready"
-[ -f /srv/tftp/arm64/grubnetaa64.efi ] && echo "ARM64 GRUB: ready"
+[ -f /srv/tftp/arm64/start4.elf ] && echo "ARM64 Pi firmware: ready"
+[ -f /srv/tftp/arm64/vmlinuz ] && echo "ARM64 kernel: ready"
 
 echo "=== PXE Setup Complete $(date) ==="
 echo ""
 echo "Multi-arch PXE server ready at $PI_IP"
-echo "  x86_64: any UEFI PC that network boots → Ubuntu"
-echo "  ARM64:  any UEFI ARM64 device (Pi 4/5 with UEFI firmware) → Ubuntu"
+echo "  x86_64: UEFI PXE boot → GRUB → Ubuntu autoinstall"
+echo "  ARM64:  Pi native TFTP boot → Ubuntu autoinstall"
+echo ""
+echo "For Pi clients:"
+echo "  Pi 3:   needs bootcode.bin on SD card, or OTP network boot enabled"
+echo "  Pi 4/5: set EEPROM BOOT_ORDER=0xf21 for network boot"
+echo ""
 echo "Stop serving: sudo systemctl stop dnsmasq"
