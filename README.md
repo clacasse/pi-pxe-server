@@ -19,7 +19,20 @@ No Ansible, no Docker — just cloud-init and a shell script. The Pi is single-p
 - Existing DHCP server on the network (router, UniFi, etc.)
 - Python 3.10+ on your workstation (for `prepare_sd.py`)
 - **x86_64 targets:** Secure Boot disabled, PXE/Network boot set as first boot option in BIOS
-- **ARM64 targets:** must be able to UEFI PXE boot (you provide the firmware). Options include [rpi4-uefi-ipxe](https://github.com/rgl/rpi4-uefi-ipxe) for Pi 4, [pftf/RPi4](https://github.com/pftf/RPi4) UEFI firmware, or EEPROM network boot — whatever gets your device to send a UEFI PXE request on the network
+- **ARM64 targets:** must be able to UEFI PXE boot — see below
+
+### ARM64 PXE boot setup by Pi model
+
+The PXE server handles ARM64 automatically. The client Pi needs firmware that sends a UEFI PXE request on the network.
+
+**Raspberry Pi 3 / 3B+:**
+Flash [ipxe/pipxe](https://github.com/ipxe/pipxe/releases) `sdcard.img` to an SD card. Insert it, plug in ethernet, power on — iPXE boots and PXE requests from the server.
+
+**Raspberry Pi 4:**
+Flash [rgl/rpi4-uefi-ipxe](https://github.com/rgl/rpi4-uefi-ipxe) to an SD card. Alternatively, flash [pftf/RPi4](https://github.com/pftf/RPi4) UEFI firmware and set network boot as first boot option in the UEFI settings.
+
+**Raspberry Pi 5:**
+No known iPXE or UEFI firmware available yet. Contributions welcome — this is a gap in the ecosystem. For now, install Ubuntu on the Pi 5 manually and manage it with `prep-node` from [k8s-cluster-bootstrap](https://github.com/clacasse/k8s-cluster-bootstrap).
 
 ## Quick Start
 
