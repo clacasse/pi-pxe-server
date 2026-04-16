@@ -19,7 +19,7 @@ No Ansible, no Docker — just cloud-init and a shell script. The Pi is single-p
 - Existing DHCP server on the network (router, UniFi, etc.)
 - Python 3.10+ on your workstation (for `prepare_sd.py`)
 - **x86_64 targets:** Secure Boot disabled, PXE/Network boot set as first boot option in BIOS
-- **ARM64 targets (Pi 4/5):** [Pi UEFI firmware](https://github.com/pftf/RPi4) flashed to SD card, or EEPROM network boot enabled (`BOOT_ORDER=0xf21`)
+- **ARM64 targets:** must be able to UEFI PXE boot (you provide the firmware). Options include [rpi4-uefi-ipxe](https://github.com/rgl/rpi4-uefi-ipxe) for Pi 4, [pftf/RPi4](https://github.com/pftf/RPi4) UEFI firmware, or EEPROM network boot — whatever gets your device to send a UEFI PXE request on the network
 
 ## Quick Start
 
