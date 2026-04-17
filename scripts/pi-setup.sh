@@ -119,10 +119,19 @@ PI_FW_BASE="https://raw.githubusercontent.com/raspberrypi/firmware/master/boot"
 
 echo "Downloading Pi boot firmware..."
 for f in bootcode.bin start.elf start4.elf fixup.dat fixup4.dat \
+         armstub8-2712.bin \
          bcm2710-rpi-3-b.dtb bcm2710-rpi-3-b-plus.dtb \
          bcm2711-rpi-4-b.dtb bcm2712-rpi-5-b.dtb; do
     echo "  $f"
     wget -q -O "/srv/tftp/arm64/$f" "$PI_FW_BASE/$f" || echo "  (not found, skipping)"
+done
+
+# Pi 5 needs overlay files
+echo "Downloading Pi overlay files..."
+mkdir -p /srv/tftp/arm64/overlays
+for f in overlay_map.dtb bcm2712d0.dtbo; do
+    echo "  overlays/$f"
+    wget -q -O "/srv/tftp/arm64/overlays/$f" "$PI_FW_BASE/overlays/$f" || echo "  (not found, skipping)"
 done
 
 # Pi native boot: the Pi looks for files by serial number prefix,
@@ -132,6 +141,8 @@ for f in /srv/tftp/arm64/*; do
     base=$(basename "$f")
     [ ! -e "/srv/tftp/$base" ] && ln -sf "arm64/$base" "/srv/tftp/$base"
 done
+# Symlink the overlays directory too
+[ ! -e "/srv/tftp/overlays" ] && ln -sf "arm64/overlays" "/srv/tftp/overlays"
 
 # ---- Enable services ----
 echo "Enabling services..."

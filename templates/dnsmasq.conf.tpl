@@ -15,6 +15,7 @@ pxe-service=0,"Raspberry Pi Boot"
 
 enable-tftp
 tftp-root=/srv/tftp
+tftp-max=200
 
 log-dhcp
 log-queries
