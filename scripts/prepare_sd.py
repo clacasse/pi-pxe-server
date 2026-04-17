@@ -228,8 +228,9 @@ def write_sd_card(
                   "pi-cmdline.txt.tpl", "nginx-pxe.conf", "cloud-init-user-data.tpl"]:
         shutil.copyfile(TEMPLATES_DIR / name, sd_repo / "templates" / name)
 
-    # Copy pi-setup.sh
-    shutil.copyfile(REPO_DIR / "scripts" / "pi-setup.sh", sd_repo / "scripts" / "pi-setup.sh")
+    # Copy scripts
+    for script in ["pi-setup.sh", "build-pi-installer.sh"]:
+        shutil.copyfile(REPO_DIR / "scripts" / script, sd_repo / "scripts" / script)
 
     # Render and write autoinstall user-data (x86_64)
     user_data_content = render_autoinstall(

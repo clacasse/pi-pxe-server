@@ -102,26 +102,31 @@ umount /mnt/iso
 
 # ---- Extract ARM64 boot files from preinstalled Pi image ----
 echo "Extracting ARM64 Pi boot files..."
-# Mount the first partition (FAT32 boot/system-boot) of the Pi image
 LOOP_DEV=$(losetup --find --show --partscan /srv/http/arm64/ubuntu-pi.img)
 mkdir -p /mnt/piboot
 mount "${LOOP_DEV}p1" /mnt/piboot
 
-# Copy firmware from boot partition root
+# Copy firmware from boot partition root (needed for TFTP boot chain)
 cp /mnt/piboot/bootcode.bin /srv/tftp/arm64/ 2>/dev/null || true
 cp /mnt/piboot/start*.elf /srv/tftp/arm64/ 2>/dev/null || true
 cp /mnt/piboot/fixup*.dat /srv/tftp/arm64/ 2>/dev/null || true
 
-# Kernel, initrd, device trees, and overlays are in current/ subdirectory
+# Kernel and device trees from current/ subdirectory
 cp /mnt/piboot/current/vmlinuz /srv/tftp/arm64/vmlinuz
-cp /mnt/piboot/current/initrd.img /srv/tftp/arm64/initrd
 cp /mnt/piboot/current/*.dtb /srv/tftp/arm64/ 2>/dev/null || true
 cp -r /mnt/piboot/current/overlays /srv/tftp/arm64/ 2>/dev/null || true
 
 umount /mnt/piboot
 losetup -d "$LOOP_DEV"
 
-# Write cloud-init user-data for Pi clients
+# Build the installer initramfs (replaces the image's initrd with a
+# tiny busybox-based installer that downloads + writes the image to disk)
+chmod +x "$BOOT_REPO/scripts/build-pi-installer.sh"
+"$BOOT_REPO/scripts/build-pi-installer.sh" /tmp/pi-initrd "$PI_IP"
+cp /tmp/pi-initrd/../pi-installer.img /srv/tftp/arm64/initrd
+rm -rf /tmp/pi-initrd /tmp/pi-installer.img
+
+# Cloud-init user-data (applied after image is written to disk)
 cp "$BOOT_REPO/autoinstall/pi-user-data" /srv/http/arm64/user-data
 echo "{}" > /srv/http/arm64/meta-data
 touch /srv/http/arm64/vendor-data
