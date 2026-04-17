@@ -44,9 +44,10 @@ See the [official bootloader configuration docs](https://www.raspberrypi.com/doc
 **Raspberry Pi 3 / 3B+:**
 The Pi 3 doesn't have configurable EEPROM. Put `bootcode.bin` on a FAT32-formatted SD card — the Pi 3 loads this from SD, then switches to TFTP for everything else. Download it from [raspberrypi/firmware](https://github.com/raspberrypi/firmware/blob/master/boot/bootcode.bin).
 
-**Raspberry Pi 4:**
+**Raspberry Pi 4 / 5:**
+The default `BOOT_ORDER` does not include network boot. Add it as a last-resort fallback:
 ```bash
-# On a running Pi 4 (with Pi OS or Ubuntu on SD):
+# On a running Pi 4 or 5 (with Pi OS or Ubuntu on SD):
 sudo rpi-eeprom-config --edit
 
 # SD (1), USB (4), NVMe (6), then network (2) as last resort.
@@ -55,17 +56,7 @@ sudo rpi-eeprom-config --edit
 # to PXE install. The PXE server can stay running permanently.
 BOOT_ORDER=0xf2641
 ```
-Reboot. To PXE install: remove all bootable media (SD, USB), and the Pi will fall through to network boot.
-
-**Raspberry Pi 5:**
-Same as Pi 4. The default `BOOT_ORDER` is `0xf461` (NVMe → USB → SD) which does **not** include network boot. Add it as a fallback:
-```bash
-sudo rpi-eeprom-config --edit
-
-# SD (1), USB (4), NVMe (6), then network (2) as last resort
-BOOT_ORDER=0xf2641
-```
-Reboot. Normal boots use the installed OS. To PXE install onto a new disk: attach the blank disk, remove any other bootable media, and power on.
+Reboot. Normal boots use the installed OS. To PXE install: remove all bootable media (SD, USB) and power on — the Pi falls through to network boot.
 
 **Recovery:** If you misconfigure the EEPROM, flash the "Bootloader" recovery image from Raspberry Pi Imager (Misc utility images → Bootloader → your Pi model) to an SD card. Boot with it inserted, wait for the green LED to flash steadily, power off, remove SD. EEPROM is restored to defaults.
 
