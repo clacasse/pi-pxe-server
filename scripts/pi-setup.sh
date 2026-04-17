@@ -107,15 +107,16 @@ LOOP_DEV=$(losetup --find --show --partscan /srv/http/arm64/ubuntu-pi.img)
 mkdir -p /mnt/piboot
 mount "${LOOP_DEV}p1" /mnt/piboot
 
-# Copy kernel, initrd, device trees, firmware, and overlays
-cp /mnt/piboot/vmlinuz /srv/tftp/arm64/vmlinuz 2>/dev/null || cp /mnt/piboot/vmlinux /srv/tftp/arm64/vmlinuz 2>/dev/null
-cp /mnt/piboot/initrd.img /srv/tftp/arm64/initrd
-cp /mnt/piboot/*.dtb /srv/tftp/arm64/ 2>/dev/null || true
-cp -r /mnt/piboot/overlays /srv/tftp/arm64/ 2>/dev/null || true
+# Copy firmware from boot partition root
 cp /mnt/piboot/bootcode.bin /srv/tftp/arm64/ 2>/dev/null || true
 cp /mnt/piboot/start*.elf /srv/tftp/arm64/ 2>/dev/null || true
 cp /mnt/piboot/fixup*.dat /srv/tftp/arm64/ 2>/dev/null || true
-cp /mnt/piboot/armstub*.bin /srv/tftp/arm64/ 2>/dev/null || true
+
+# Kernel, initrd, device trees, and overlays are in current/ subdirectory
+cp /mnt/piboot/current/vmlinuz /srv/tftp/arm64/vmlinuz
+cp /mnt/piboot/current/initrd.img /srv/tftp/arm64/initrd
+cp /mnt/piboot/current/*.dtb /srv/tftp/arm64/ 2>/dev/null || true
+cp -r /mnt/piboot/current/overlays /srv/tftp/arm64/ 2>/dev/null || true
 
 umount /mnt/piboot
 losetup -d "$LOOP_DEV"
@@ -140,14 +141,17 @@ cp /tmp/grub-x86-signed/usr/lib/grub/x86_64-efi-signed/grubnetx64.efi.signed /sr
 cp -r /tmp/grub-x86-bin/usr/lib/grub/x86_64-efi /srv/tftp/x86_64/grub/x86_64-efi
 rm -rf /tmp/grub-x86-signed /tmp/grub-x86-bin /tmp/grub-x86-signed.deb /tmp/grub-x86-bin.deb
 
-# ---- Symlink ARM64 files to TFTP root ----
+# ---- Link ARM64 files to TFTP root ----
 # Pi native boot looks for files by serial number prefix, then falls
-# back to the TFTP root. Symlink so all Pis find the arm64 files.
+# back to the TFTP root. Symlink files and copy overlays (symlinked
+# directories don't resolve correctly from within other symlinks).
 for f in /srv/tftp/arm64/*; do
     base=$(basename "$f")
-    [ ! -e "/srv/tftp/$base" ] && ln -sf "arm64/$base" "/srv/tftp/$base"
+    [ "$base" = "overlays" ] && continue
+    ln -sf "arm64/$base" "/srv/tftp/$base" 2>/dev/null || true
 done
-[ ! -e "/srv/tftp/overlays" ] && ln -sf "arm64/overlays" "/srv/tftp/overlays"
+rm -rf /srv/tftp/overlays
+cp -r /srv/tftp/arm64/overlays /srv/tftp/overlays
 
 # ---- Enable services ----
 echo "Enabling services..."
