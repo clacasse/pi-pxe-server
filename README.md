@@ -49,22 +49,23 @@ The Pi 3 doesn't have configurable EEPROM. Put `bootcode.bin` on a FAT32-formatt
 # On a running Pi 4 (with Pi OS or Ubuntu on SD):
 sudo rpi-eeprom-config --edit
 
-# Add network boot (2) to the boot order. This tries network first,
-# then USB, then SD. When nothing is installed, it PXE boots.
-# After install, it boots from the installed disk.
-BOOT_ORDER=0xf1642
+# SD (1), USB (4), NVMe (6), then network (2) as last resort.
+# The Pi boots from the first disk with a valid OS. Network boot
+# only triggers when no disk has an OS — exactly when you want
+# to PXE install. The PXE server can stay running permanently.
+BOOT_ORDER=0xf2641
 ```
-Reboot, then remove the SD card. The Pi will try network boot, receive Ubuntu from the PXE server, and install to whatever disk is attached.
+Reboot. To PXE install: remove all bootable media (SD, USB), and the Pi will fall through to network boot.
 
 **Raspberry Pi 5:**
-Same as Pi 4. The default `BOOT_ORDER` is `0xf461` (NVMe → USB → SD) which does **not** include network boot. Add it:
+Same as Pi 4. The default `BOOT_ORDER` is `0xf461` (NVMe → USB → SD) which does **not** include network boot. Add it as a fallback:
 ```bash
 sudo rpi-eeprom-config --edit
 
-# Network (2) first, then NVMe (6), USB (4), SD (1)
-BOOT_ORDER=0xf1642
+# SD (1), USB (4), NVMe (6), then network (2) as last resort
+BOOT_ORDER=0xf2641
 ```
-Reboot, remove the SD card, and the Pi 5 will PXE boot. After Ubuntu is installed to NVMe/USB, it boots from there directly — network boot times out in a few seconds and falls through.
+Reboot. Normal boots use the installed OS. To PXE install onto a new disk: attach the blank disk, remove any other bootable media, and power on.
 
 **Recovery:** If you misconfigure the EEPROM, flash the "Bootloader" recovery image from Raspberry Pi Imager (Misc utility images → Bootloader → your Pi model) to an SD card. Boot with it inserted, wait for the green LED to flash steadily, power off, remove SD. EEPROM is restored to defaults.
 
