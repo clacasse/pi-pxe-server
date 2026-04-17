@@ -1,1 +1,0 @@
-console=tty1 console=serial0,115200

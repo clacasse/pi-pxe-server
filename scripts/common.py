@@ -1,4 +1,4 @@
-"""Shared helpers for Pi PXE server CLI scripts."""
+"""Shared helpers for node-bootstrap CLI scripts."""
 
 import subprocess
 import sys

@@ -1,181 +1,118 @@
-# Pi PXE Server
+# Node Bootstrap
 
-Multi-architecture PXE server on a Raspberry Pi. Boots x86_64 PCs and ARM64 devices (including other Pis) into unattended Ubuntu installs.
+From bare metal to Ubuntu: PXE boot for x86, SD card prep for Raspberry Pi.
 
 ## What This Does
 
-From a fresh Raspberry Pi, this repo:
+Two paths to get a fresh machine running Ubuntu Server, ready for further provisioning:
 
-1. Turns a **Raspberry Pi** into a multi-arch PXE server (dnsmasq + nginx)
-2. PXE boots **x86_64** and **ARM64** machines with fully **unattended Ubuntu 25.10** installs
-3. Leaves you with clean Ubuntu servers ready for further provisioning
+- **x86_64 targets:** A Raspberry Pi PXE server automatically installs Ubuntu via network boot (fully unattended)
+- **Pi targets:** Flash Ubuntu with Pi Imager, then run `prepare_pi_target.py` to inject your user, SSH key, and NOPASSWD sudo
 
-No Ansible, no Docker — just cloud-init and a shell script. The Pi is single-purpose and meant to be "flash once, forget about it." To reconfigure, reflash.
+Both paths leave you with a clean Ubuntu server ready for [k8s-cluster-bootstrap](https://github.com/clacasse/k8s-cluster-bootstrap)'s `prep-node`.
 
 ## Prerequisites
 
-- Raspberry Pi (4 recommended, 3B+ works) as the PXE server
-- Target machine(s) connected via ethernet to the same network
-- Existing DHCP server on the network (router, UniFi, etc.)
-- Python 3.10+ on your workstation (for `prepare_sd.py`)
-- Target machines connected via ethernet to the same network
+- Raspberry Pi (any model) as the PXE server
+- Python 3.10+ on your workstation
+- For x86 targets: Secure Boot disabled, PXE/Network boot enabled in BIOS
+- For Pi targets: [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
 
-### Preparing x86_64 targets
+## x86 Targets: PXE Boot
 
-Disable Secure Boot and set PXE/Network boot as the first boot option in BIOS. Most modern motherboards support this — check under Boot Priority or Boot Order in your BIOS settings.
+### Step 1: Set up the PXE server
 
-### Preparing Raspberry Pi targets
-
-The PXE server auto-detects x86 vs. Pi clients and serves the right files. Pi clients use native TFTP boot (no UEFI firmware needed), but need network boot enabled in their EEPROM or boot firmware.
-
-Pi 4 and Pi 5 store boot configuration in EEPROM. The `BOOT_ORDER` setting controls which boot modes are tried and in what order. Each hex digit is a boot mode, read right-to-left:
-
-| Code | Boot mode |
-|---|---|
-| `1` | SD card |
-| `2` | Network (TFTP) |
-| `4` | USB mass storage |
-| `6` | NVMe |
-| `7` | HTTP boot |
-| `f` | Restart (loop) |
-
-See the [official bootloader configuration docs](https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#raspberry-pi-bootloader-configuration) for the full reference.
-
-**Raspberry Pi 3 / 3B+:**
-The Pi 3 doesn't have configurable EEPROM. Put `bootcode.bin` on a FAT32-formatted SD card — the Pi 3 loads this from SD, then switches to TFTP for everything else. Download it from [raspberrypi/firmware](https://github.com/raspberrypi/firmware/blob/master/boot/bootcode.bin).
-
-**Raspberry Pi 4 / 5:**
-The default `BOOT_ORDER` does not include network boot. Add it as a last-resort fallback:
-```bash
-# On a running Pi 4 or 5 (with Pi OS or Ubuntu on SD):
-sudo rpi-eeprom-config --edit
-
-# SD (1), USB (4), NVMe (6), then network (2) as last resort.
-# The Pi boots from the first disk with a valid OS. Network boot
-# only triggers when no disk has an OS — exactly when you want
-# to PXE install. The PXE server can stay running permanently.
-BOOT_ORDER=0xf2641
-```
-Reboot. Normal boots use the installed OS. To PXE install: remove all bootable media (SD, USB) and power on — the Pi falls through to network boot.
-
-**Recovery:** If you misconfigure the EEPROM, flash the "Bootloader" recovery image from Raspberry Pi Imager (Misc utility images → Bootloader → your Pi model) to an SD card. Boot with it inserted, wait for the green LED to flash steadily, power off, remove SD. EEPROM is restored to defaults.
-
-## Quick Start
-
-### Step 1: Flash the Pi
-
-Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/):
-- OS: **Raspberry Pi OS Lite (64-bit)**
-- Click the gear icon to configure: hostname, enable SSH, username + password
-- Skip WiFi (use ethernet)
-- Flash the SD card, but **don't eject yet**
-
-### Step 2: Prepare the SD Card
+Flash a Raspberry Pi with Pi OS Lite and prepare it as a PXE server:
 
 ```bash
-git clone git@github.com:clacasse/pi-pxe-server.git
-cd pi-pxe-server
+git clone git@github.com:clacasse/node-bootstrap.git
+cd node-bootstrap
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python scripts/prepare_sd.py
+python scripts/prepare_pxe_server.py
 ```
 
-The script will prompt you for:
+The script prompts for:
 - Pi hostname and username (as set in Raspberry Pi Imager)
-- Target machine username and password (applies to all PXE-installed machines)
+- Target machine username and password (for all PXE-installed machines)
 - SSH public key (auto-detected if available)
 
-All options can also be passed as flags:
+### Step 2: Boot the PXE server Pi
+
+1. Eject SD card, insert into Pi, connect ethernet, power on
+2. Cloud-init runs `pi-setup.sh` which downloads the Ubuntu ISO, extracts GRUB, and starts dnsmasq + nginx
+3. Monitor: `ssh <pi-user>@<pi-hostname> 'sudo tail -f /var/log/pxe-setup.log'`
+
+### Step 3: PXE boot target machines
+
+1. Connect target via ethernet, power on
+2. It PXE boots and installs Ubuntu automatically (~20-30 min)
+3. SSH in: `ssh <username>@<machine-ip>`
+
+### Controlling the PXE server
+
+- **PXE on:** `sudo systemctl start dnsmasq`
+- **PXE off:** `sudo systemctl stop dnsmasq`
+
+## Pi Targets: SD Card Prep
+
+### Step 1: Flash Ubuntu
+
+Use Raspberry Pi Imager:
+- OS: **Ubuntu Server 25.10 (64-bit)**
+- Storage: your SD card (or USB SSD)
+- Don't eject yet
+
+### Step 2: Prepare the SD card
 
 ```bash
-python scripts/prepare_sd.py /path/to/boot/partition \
-    --pi-hostname pxe-server \
-    --pi-user pi \
+cd node-bootstrap
+source .venv/bin/activate
+python scripts/prepare_pi_target.py /Volumes/system-boot
+```
+
+The script prompts for username, password, and SSH key, then writes cloud-init configuration to the boot partition.
+
+All options can be passed as flags:
+```bash
+python scripts/prepare_pi_target.py /Volumes/system-boot \
     --username admin \
     --password "secret" \
     --ssh-key-file ~/.ssh/id_ed25519.pub \
     -y
 ```
 
-Works on **Linux**, **macOS**, and **WSL**.
-
 ### Step 3: Boot the Pi
 
-1. Eject the SD card, insert into Pi
-2. Connect ethernet, power on
-3. Cloud-init will automatically:
-   - Install dnsmasq, nginx, wget
-   - Run `pi-setup.sh` which downloads Ubuntu ISO, extracts GRUB, writes configs, and starts services
-
-Monitor progress: `ssh <pi-user>@<pi-hostname> 'sudo tail -f /var/log/pxe-setup.log'`
-
-### Step 4: PXE Boot Target Machines
-
-1. Connect target machine via ethernet
-2. Power on — it will PXE boot and install Ubuntu automatically
-3. Wait ~20-30 min for install to complete
-4. SSH in: `ssh <username>@<machine-ip>`
-
-## How It Works
-
-```
-┌──────────────────────────────────────────────┐
-│  Raspberry Pi (PXE Server)                   │
-│  dnsmasq (proxyDHCP + TFTP, multi-arch)     │
-│  nginx (HTTP on port 8080)                   │
-└─────────────────────┬────────────────────────┘
-                      │
-        Network (existing DHCP from router)
-                      │
-        ┌─────────────┴─────────────���
-        │                           │
-┌───────┴──────────┐  ┌────────────┴───────────┐
-│  x86_64 PC       │  │  ARM64 device (Pi 4/5) │
-│  UEFI PXE boot   │  │  UEFI PXE boot         │
-│  → Ubuntu 25.10  │  │  → Ubuntu 25.10        │
-└──────────────────┘  └────────────────────────┘
-```
-
-The PXE server serves any machine that network boots. Control it by starting/stopping dnsmasq:
-
-- **PXE on**: `sudo systemctl start dnsmasq` — any machine that PXE boots gets Ubuntu installed
-- **PXE off**: `sudo systemctl stop dnsmasq` — machines boot from local disk normally
-
-## Reconfigure
-
-The Pi is designed as a throwaway / single-purpose device. To change settings:
-
-1. Update config on your workstation
-2. Re-run `python scripts/prepare_sd.py`
-3. Reflash the SD card
-4. Reboot the Pi
+1. Eject SD card, insert into Pi, power on
+2. Cloud-init configures the user, SSH key, and NOPASSWD sudo on first boot
+3. SSH in: `ssh <username>@<pi-ip>`
 
 ## File Structure
 
 ```
-pi-pxe-server/
+node-bootstrap/
 ├── README.md
 ├── pyproject.toml
 ├── requirements.txt
 ├── scripts/
-│   ├── prepare_sd.py              # SD card setup (typer CLI)
-│   ├── pi-setup.sh                # Runs once on Pi first boot (multi-arch)
+│   ├── prepare_pxe_server.py      # Set up the PXE server Pi's SD card
+│   ├── prepare_pi_target.py       # Prep a Pi target's SD card with cloud-init
+│   ├── pi-setup.sh                # Runs on PXE server Pi first boot
 │   └── common.py                  # Shared helpers
 └── templates/
-    ├── dnsmasq.conf.tpl           # Multi-arch proxyDHCP + TFTP
+    ├── dnsmasq.conf.tpl           # PXE server config
     ├── grub-x86_64.cfg.tpl        # x86_64 GRUB boot config
-    ├── pi-config.txt.tpl          # Pi native boot config.txt
-    ├── pi-cmdline.txt.tpl         # Pi kernel cmdline (autoinstall)
-    ├── nginx-pxe.conf             # static
-    ├── autoinstall-user-data.tpl  # target install config
+    ├── nginx-pxe.conf             # HTTP server for ISOs + autoinstall
+    ├── autoinstall-user-data.tpl  # x86 target autoinstall config
+    ├── cloud-init-user-data.tpl   # Pi target cloud-init config
     └── autoinstall-meta-data      # static
 ```
 
 ## Troubleshooting
 
-Check the logs:
+PXE server logs:
 - First-boot setup: `sudo tail -f /var/log/pxe-setup.log`
-- Cloud-init: `sudo journalctl -u cloud-final -f`
 - dnsmasq: `sudo journalctl -u dnsmasq -f`
 - nginx: `sudo journalctl -u nginx -f`
