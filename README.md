@@ -18,28 +18,55 @@ No Ansible, no Docker — just cloud-init and a shell script. The Pi is single-p
 - Target machine(s) connected via ethernet to the same network
 - Existing DHCP server on the network (router, UniFi, etc.)
 - Python 3.10+ on your workstation (for `prepare_sd.py`)
-- **x86_64 targets:** Secure Boot disabled, PXE/Network boot set as first boot option in BIOS
-- **ARM64 targets (Raspberry Pi):** enable native network boot — see below
+- Target machines connected via ethernet to the same network
 
-### Preparing Pi clients for network boot
+### Preparing x86_64 targets
 
-The PXE server auto-detects x86 vs. Pi clients and serves the right files. Pi clients use native TFTP boot (no UEFI firmware needed), but need network boot enabled:
+Disable Secure Boot and set PXE/Network boot as the first boot option in BIOS. Most modern motherboards support this — check under Boot Priority or Boot Order in your BIOS settings.
+
+### Preparing Raspberry Pi targets
+
+The PXE server auto-detects x86 vs. Pi clients and serves the right files. Pi clients use native TFTP boot (no UEFI firmware needed), but need network boot enabled in their EEPROM or boot firmware.
+
+Pi 4 and Pi 5 store boot configuration in EEPROM. The `BOOT_ORDER` setting controls which boot modes are tried and in what order. Each hex digit is a boot mode, read right-to-left:
+
+| Code | Boot mode |
+|---|---|
+| `1` | SD card |
+| `2` | Network (TFTP) |
+| `4` | USB mass storage |
+| `6` | NVMe |
+| `7` | HTTP boot |
+| `f` | Restart (loop) |
+
+See the [official bootloader configuration docs](https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#raspberry-pi-bootloader-configuration) for the full reference.
 
 **Raspberry Pi 3 / 3B+:**
-Put `bootcode.bin` on a FAT32-formatted SD card — the Pi 3 loads this from SD, then switches to TFTP for everything else. Download it from [raspberrypi/firmware](https://github.com/raspberrypi/firmware/blob/master/boot/bootcode.bin).
+The Pi 3 doesn't have configurable EEPROM. Put `bootcode.bin` on a FAT32-formatted SD card — the Pi 3 loads this from SD, then switches to TFTP for everything else. Download it from [raspberrypi/firmware](https://github.com/raspberrypi/firmware/blob/master/boot/bootcode.bin).
 
 **Raspberry Pi 4:**
-Set EEPROM to try network boot first:
 ```bash
-# On a running Pi 4:
+# On a running Pi 4 (with Pi OS or Ubuntu on SD):
 sudo rpi-eeprom-config --edit
-# Set: BOOT_ORDER=0xf21
-sudo reboot
-# Remove SD card — it will network boot.
+
+# Add network boot (2) to the boot order. This tries network first,
+# then USB, then SD. When nothing is installed, it PXE boots.
+# After install, it boots from the installed disk.
+BOOT_ORDER=0xf1642
 ```
+Reboot, then remove the SD card. The Pi will try network boot, receive Ubuntu from the PXE server, and install to whatever disk is attached.
 
 **Raspberry Pi 5:**
-Same as Pi 4 — update EEPROM `BOOT_ORDER=0xf21`.
+Same as Pi 4. The default `BOOT_ORDER` is `0xf461` (NVMe → USB → SD) which does **not** include network boot. Add it:
+```bash
+sudo rpi-eeprom-config --edit
+
+# Network (2) first, then NVMe (6), USB (4), SD (1)
+BOOT_ORDER=0xf1642
+```
+Reboot, remove the SD card, and the Pi 5 will PXE boot. After Ubuntu is installed to NVMe/USB, it boots from there directly — network boot times out in a few seconds and falls through.
+
+**Recovery:** If you misconfigure the EEPROM, flash the "Bootloader" recovery image from Raspberry Pi Imager (Misc utility images → Bootloader → your Pi model) to an SD card. Boot with it inserted, wait for the green LED to flash steadily, power off, remove SD. EEPROM is restored to defaults.
 
 ## Quick Start
 
