@@ -73,18 +73,26 @@ cp "$BOOT_REPO/autoinstall/user-data" /srv/http/autoinstall/user-data
 cp "$BOOT_REPO/autoinstall/meta-data" /srv/http/autoinstall/meta-data
 touch /srv/http/autoinstall/vendor-data
 
-# ---- Download Ubuntu ISOs ----
+# ---- Download Ubuntu images ----
 UBUNTU_VERSION="${UBUNTU_VERSION:-25.10}"
 
+# x86_64: live-server ISO (for autoinstall)
 echo "Downloading Ubuntu x86_64 ISO (${UBUNTU_VERSION})..."
 wget -q --show-progress -O /srv/http/x86_64/ubuntu.iso \
     "https://releases.ubuntu.com/${UBUNTU_VERSION}/ubuntu-${UBUNTU_VERSION}-live-server-amd64.iso"
 
-echo "Downloading Ubuntu ARM64 ISO (${UBUNTU_VERSION})..."
-wget -q --show-progress -O /srv/http/arm64/ubuntu.iso \
-    "https://cdimage.ubuntu.com/releases/${UBUNTU_VERSION}/release/ubuntu-${UBUNTU_VERSION}-live-server-arm64.iso"
+# ARM64: preinstalled Pi image (for cloud-init — much smaller boot files)
+PI_IMG_URL="https://cdimage.ubuntu.com/releases/${UBUNTU_VERSION}/release/ubuntu-${UBUNTU_VERSION}-preinstalled-server-arm64+raspi.img.xz"
+echo "Downloading Ubuntu ARM64 preinstalled Pi image (${UBUNTU_VERSION})..."
+wget -q --show-progress -O /tmp/ubuntu-pi.img.xz "$PI_IMG_URL"
 
-# ---- Extract x86_64 kernel + initrd ----
+echo "Decompressing Pi image..."
+xz -d /tmp/ubuntu-pi.img.xz
+
+# Serve the raw image via HTTP for Pi clients to write to disk
+mv /tmp/ubuntu-pi.img /srv/http/arm64/ubuntu-pi.img
+
+# ---- Extract x86_64 kernel + initrd from ISO ----
 echo "Extracting x86_64 kernel/initrd..."
 mkdir -p /mnt/iso
 mount -o loop,ro /srv/http/x86_64/ubuntu.iso /mnt/iso
@@ -92,12 +100,30 @@ cp /mnt/iso/casper/vmlinuz /srv/tftp/x86_64/vmlinuz
 cp /mnt/iso/casper/initrd /srv/tftp/x86_64/initrd
 umount /mnt/iso
 
-# ---- Extract ARM64 kernel + initrd ----
-echo "Extracting ARM64 kernel/initrd..."
-mount -o loop,ro /srv/http/arm64/ubuntu.iso /mnt/iso
-cp /mnt/iso/casper/vmlinuz /srv/tftp/arm64/vmlinuz
-cp /mnt/iso/casper/initrd /srv/tftp/arm64/initrd
-umount /mnt/iso
+# ---- Extract ARM64 boot files from preinstalled Pi image ----
+echo "Extracting ARM64 Pi boot files..."
+# Mount the first partition (FAT32 boot/system-boot) of the Pi image
+LOOP_DEV=$(losetup --find --show --partscan /srv/http/arm64/ubuntu-pi.img)
+mkdir -p /mnt/piboot
+mount "${LOOP_DEV}p1" /mnt/piboot
+
+# Copy kernel, initrd, device trees, firmware, and overlays
+cp /mnt/piboot/vmlinuz /srv/tftp/arm64/vmlinuz 2>/dev/null || cp /mnt/piboot/vmlinux /srv/tftp/arm64/vmlinuz 2>/dev/null
+cp /mnt/piboot/initrd.img /srv/tftp/arm64/initrd
+cp /mnt/piboot/*.dtb /srv/tftp/arm64/ 2>/dev/null || true
+cp -r /mnt/piboot/overlays /srv/tftp/arm64/ 2>/dev/null || true
+cp /mnt/piboot/bootcode.bin /srv/tftp/arm64/ 2>/dev/null || true
+cp /mnt/piboot/start*.elf /srv/tftp/arm64/ 2>/dev/null || true
+cp /mnt/piboot/fixup*.dat /srv/tftp/arm64/ 2>/dev/null || true
+cp /mnt/piboot/armstub*.bin /srv/tftp/arm64/ 2>/dev/null || true
+
+umount /mnt/piboot
+losetup -d "$LOOP_DEV"
+
+# Write cloud-init user-data for Pi clients
+cp "$BOOT_REPO/autoinstall/pi-user-data" /srv/http/arm64/user-data
+echo "{}" > /srv/http/arm64/meta-data
+touch /srv/http/arm64/vendor-data
 
 # ---- Download x86_64 GRUB ----
 GRUB_X86_SIGNED_DEB="http://archive.ubuntu.com/ubuntu/pool/main/g/grub2-signed/grub-efi-amd64-signed_1.202+2.12-1ubuntu7_amd64.deb"
@@ -114,34 +140,13 @@ cp /tmp/grub-x86-signed/usr/lib/grub/x86_64-efi-signed/grubnetx64.efi.signed /sr
 cp -r /tmp/grub-x86-bin/usr/lib/grub/x86_64-efi /srv/tftp/x86_64/grub/x86_64-efi
 rm -rf /tmp/grub-x86-signed /tmp/grub-x86-bin /tmp/grub-x86-signed.deb /tmp/grub-x86-bin.deb
 
-# ---- Download Pi boot firmware (for native TFTP boot) ----
-PI_FW_BASE="https://raw.githubusercontent.com/raspberrypi/firmware/master/boot"
-
-echo "Downloading Pi boot firmware..."
-for f in bootcode.bin start.elf start4.elf fixup.dat fixup4.dat \
-         armstub8-2712.bin \
-         bcm2710-rpi-3-b.dtb bcm2710-rpi-3-b-plus.dtb \
-         bcm2711-rpi-4-b.dtb bcm2712-rpi-5-b.dtb; do
-    echo "  $f"
-    wget -q -O "/srv/tftp/arm64/$f" "$PI_FW_BASE/$f" || echo "  (not found, skipping)"
-done
-
-# Pi 5 needs overlay files
-echo "Downloading Pi overlay files..."
-mkdir -p /srv/tftp/arm64/overlays
-for f in overlay_map.dtb bcm2712d0.dtbo; do
-    echo "  overlays/$f"
-    wget -q -O "/srv/tftp/arm64/overlays/$f" "$PI_FW_BASE/overlays/$f" || echo "  (not found, skipping)"
-done
-
-# Pi native boot: the Pi looks for files by serial number prefix,
-# then falls back to the root. Symlink so Pis that request from
-# the TFTP root find the arm64 files.
+# ---- Symlink ARM64 files to TFTP root ----
+# Pi native boot looks for files by serial number prefix, then falls
+# back to the TFTP root. Symlink so all Pis find the arm64 files.
 for f in /srv/tftp/arm64/*; do
     base=$(basename "$f")
     [ ! -e "/srv/tftp/$base" ] && ln -sf "arm64/$base" "/srv/tftp/$base"
 done
-# Symlink the overlays directory too
 [ ! -e "/srv/tftp/overlays" ] && ln -sf "arm64/overlays" "/srv/tftp/overlays"
 
 # ---- Enable services ----
@@ -155,10 +160,11 @@ echo "Verifying..."
 sleep 2
 systemctl is-active dnsmasq && echo "dnsmasq: active"
 systemctl is-active nginx && echo "nginx: active"
-curl -sf -o /dev/null "http://localhost:8080/autoinstall/user-data" && echo "HTTP: serving"
+curl -sf -o /dev/null "http://localhost:8080/autoinstall/user-data" && echo "HTTP: x86_64 autoinstall ready"
+curl -sf -o /dev/null "http://localhost:8080/arm64/user-data" && echo "HTTP: ARM64 cloud-init ready"
 [ -f /srv/tftp/x86_64/grubnetx64.efi ] && echo "x86_64 GRUB: ready"
-[ -f /srv/tftp/arm64/start4.elf ] && echo "ARM64 Pi firmware: ready"
 [ -f /srv/tftp/arm64/vmlinuz ] && echo "ARM64 kernel: ready"
+[ -f /srv/http/arm64/ubuntu-pi.img ] && echo "ARM64 Pi image: ready ($(du -sh /srv/http/arm64/ubuntu-pi.img | cut -f1))"
 
 echo "=== PXE Setup Complete $(date) ==="
 echo ""

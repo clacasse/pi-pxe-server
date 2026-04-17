@@ -125,6 +125,29 @@ def render_autoinstall(
     return rendered
 
 
+def render_cloud_init(
+    target_username: str,
+    password_hash: str,
+    ssh_keys: list[str],
+    packages: list[str],
+) -> str:
+    """Render the cloud-init user-data template for Pi preinstalled images."""
+    template_path = TEMPLATES_DIR / "cloud-init-user-data.tpl"
+    template = Template(template_path.read_text())
+
+    runcmd_block = ""
+
+    rendered = template.substitute(
+        target_username=target_username,
+        target_password_hash=password_hash,
+        target_ssh_keys=_yaml_list(ssh_keys, indent=6),
+        target_packages=_yaml_list(packages, indent=2),
+        target_late_commands_block=runcmd_block,
+    )
+    rendered = re.sub(r"\n\n+", "\n", rendered)
+    return rendered
+
+
 # ==================== Cloud-Init Injection ====================
 
 
@@ -201,13 +224,14 @@ def write_sd_card(
     (sd_repo / "autoinstall").mkdir()
 
     # Copy template files that pi-setup.sh will reference
-    for name in ["dnsmasq.conf.tpl", "grub-x86_64.cfg.tpl", "pi-config.txt.tpl", "pi-cmdline.txt.tpl", "nginx-pxe.conf"]:
+    for name in ["dnsmasq.conf.tpl", "grub-x86_64.cfg.tpl", "pi-config.txt.tpl",
+                  "pi-cmdline.txt.tpl", "nginx-pxe.conf", "cloud-init-user-data.tpl"]:
         shutil.copyfile(TEMPLATES_DIR / name, sd_repo / "templates" / name)
 
     # Copy pi-setup.sh
     shutil.copyfile(REPO_DIR / "scripts" / "pi-setup.sh", sd_repo / "scripts" / "pi-setup.sh")
 
-    # Render and write autoinstall user-data
+    # Render and write autoinstall user-data (x86_64)
     user_data_content = render_autoinstall(
         target_username=target_username,
         password_hash=password_hash,
@@ -216,6 +240,15 @@ def write_sd_card(
         late_commands=late_commands,
     )
     (sd_repo / "autoinstall" / "user-data").write_text(user_data_content)
+
+    # Render and write cloud-init user-data (ARM64 Pi)
+    cloud_init_content = render_cloud_init(
+        target_username=target_username,
+        password_hash=password_hash,
+        ssh_keys=ssh_keys,
+        packages=packages,
+    )
+    (sd_repo / "autoinstall" / "pi-user-data").write_text(cloud_init_content)
 
     # Static autoinstall files
     shutil.copyfile(TEMPLATES_DIR / "autoinstall-meta-data", sd_repo / "autoinstall" / "meta-data")
